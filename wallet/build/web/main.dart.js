@@ -88621,8 +88621,8 @@ aD(){this.aT()
 this.wN()},
 wN(){var s=0,r=A.M(t.H),q=1,p=[],o=this,n,m,l,k,j,i
 var $async$wN=A.N(function(a,b){if(a===1){p.push(b)
-s=q}for(;;)switch(s){case 0:j=o.d=new A.a9U("wss://mqtt.idp.tripleenable.com","wallet-"+o.a.c.a+"-"+Date.now(),new A.hP(B.bX,B.bW,B.dD))
-j.b=443
+s=q}for(;;)switch(s){case 0:j=o.d=new A.a9U("wss://broker.emqx.io/mqtt","wallet-"+o.a.c.a+"-"+Date.now(),new A.hP(B.bX,B.bW,B.dD))
+j.b=8084
 $.aAT=!1
 $.aMG=!0
 j.at=30
@@ -88632,7 +88632,7 @@ q=3
 s=6
 return A.E(j.z0(),$async$wN)
 case 6:j=o.d
-n="te/push/"+o.a.c.a
+n="tripleenable/idp/push/"+o.a.c.a
 if(j.gUv().a!==B.bY){m=j.y
 m=m==null?null:m.cy.a
 l=new A.Jg()

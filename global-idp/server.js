@@ -21,7 +21,8 @@ const mqtt = require('mqtt');
 const ISSUER = (process.env.OIDC_ISSUER || 'https://id.idp.tripleenable.com').replace(/\/$/, '');
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const COOKIE_KEY = process.env.COOKIE_KEY || crypto.randomBytes(24).toString('hex');
-const MQTT_URL = process.env.MQTT_URL || 'wss://mqtt.idp.tripleenable.com';
+const MQTT_URL = process.env.MQTT_URL || 'wss://broker.emqx.io:8084/mqtt';
+const PUSH_TOPIC = (u) => 'tripleenable/idp/push/' + u; // topic distintivo en el broker público
 
 // Usuarios "semilla" (siempre presentes). El wallet añade más en runtime.
 const USERS = {
@@ -157,7 +158,7 @@ async function handle(req, res) {
     const uid = m[1]; const r = requests.get(uid);
     if (!r) return json(res, 404, { error: 'no request' });
     const { username } = JSON.parse(await readBody(req) || '{}');
-    if (mqttClient && mqttClient.connected) mqttClient.publish('te/push/' + username, JSON.stringify({ idp: ISSUER, uid, nonce: r.nonce, client: r.client }));
+    if (mqttClient && mqttClient.connected) mqttClient.publish(PUSH_TOPIC(username), JSON.stringify({ idp: ISSUER, uid, nonce: r.nonce, client: r.client }));
     return json(res, 200, { ok: true, pushed: !!(mqttClient && mqttClient.connected) });
   }
 

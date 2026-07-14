@@ -11,7 +11,8 @@ import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_browser_client.dart';
 
 const idpUrl = String.fromEnvironment('IDP_URL', defaultValue: 'https://id.idp.tripleenable.com');
-const mqttUrl = String.fromEnvironment('MQTT_URL', defaultValue: 'wss://mqtt.idp.tripleenable.com');
+const mqttUrl = String.fromEnvironment('MQTT_URL', defaultValue: 'wss://broker.emqx.io/mqtt');
+const mqttPort = int.fromEnvironment('MQTT_PORT', defaultValue: 8084);
 
 const accent = Color(0xFF5B9DFF);
 const ok = Color(0xFF34D399);
@@ -133,14 +134,14 @@ class _HomeState extends State<Home> {
 
   Future<void> _connectMqtt() async {
     _mqtt = MqttBrowserClient(mqttUrl, 'wallet-${widget.wallet.username}-${DateTime.now().millisecondsSinceEpoch}');
-    _mqtt.port = 443;
+    _mqtt.port = mqttPort;
     _mqtt.logging(on: false);
     _mqtt.keepAlivePeriod = 30;
     _mqtt.onConnected = () => setState(() => _mqttState = 'push activo');
     _mqtt.onDisconnected = () => setState(() => _mqttState = 'desconectado');
     try {
       await _mqtt.connect();
-      _mqtt.subscribe('te/push/${widget.wallet.username}', MqttQos.atMostOnce);
+      _mqtt.subscribe('tripleenable/idp/push/${widget.wallet.username}', MqttQos.atMostOnce);
       _mqtt.updates!.listen((events) {
         final rec = events[0].payload as MqttPublishMessage;
         final msg = MqttPublishPayload.bytesToStringAsString(rec.payload.message);
