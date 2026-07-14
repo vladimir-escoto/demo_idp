@@ -30,8 +30,8 @@ const BRAND_BROKER = process.env.BRAND_BROKER || '';
 
 // Usuarios "semilla" (siempre presentes). El wallet añade más en runtime.
 const USERS = {
-  ana:   { name: 'Ana Global', given_name: 'Ana',   family_name: 'Global', email: 'ana@global.tripleenable.com',   preferred_username: 'ana' },
-  bruno: { name: 'Bruno Dev',  given_name: 'Bruno', family_name: 'Dev',    email: 'bruno@global.tripleenable.com', preferred_username: 'bruno' },
+  ana:   { name: 'Ana Global', given_name: 'Ana',   family_name: 'Global', email: 'ana@idp.tripleenable.com',   preferred_username: 'ana' },
+  bruno: { name: 'Bruno Dev',  given_name: 'Bruno', family_name: 'Dev',    email: 'bruno@idp.tripleenable.com', preferred_username: 'bruno' },
 };
 const devices = new Map(); // username -> { jwk, name }
 
@@ -65,7 +65,7 @@ const provider = new Provider(ISSUER, {
     if (!u && devices.has(id)) {
       const nm = devices.get(id).name || id; const parts = nm.trim().split(/\s+/);
       u = { name: nm, given_name: parts[0] || id, family_name: parts.slice(1).join(' ') || 'Wallet',
-            email: id + '@wallet.tripleenable.com', preferred_username: id };
+            email: id + '@idp.tripleenable.com', preferred_username: id };
     }
     if (!u) return undefined;
     return { accountId: id, async claims() { return { sub: id, email_verified: true, ...u }; } };
