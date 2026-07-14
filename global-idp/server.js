@@ -61,6 +61,19 @@ const provider = new Provider(ISSUER, {
     if (!u) return undefined;
     return { accountId: id, async claims() { return { sub: id, email_verified: true, ...u }; } };
   },
+  // Auto-consentimiento: los brokers (Zitadel/Keycloak/Authentik) son de confianza.
+  // Sin esto, node-oidc-provider crea una 2ª interacción de "consent" tras el login,
+  // que nuestra UI renderiza como otro QR -> bucle infinito. Otorgamos el grant al vuelo.
+  async loadExistingGrant(ctx) {
+    const prior = ctx.oidc.result && ctx.oidc.result.consent && ctx.oidc.result.consent.grantId;
+    if (prior) return ctx.oidc.provider.Grant.find(prior);
+    const accountId = ctx.oidc.session.accountId;
+    if (!accountId) return undefined;
+    const grant = new ctx.oidc.provider.Grant({ clientId: ctx.oidc.client.clientId, accountId });
+    grant.addOIDCScope(ctx.oidc.params.scope || 'openid profile email');
+    await grant.save();
+    return grant;
+  },
   ttl: { AccessToken: 3600, AuthorizationCode: 600, IdToken: 3600, Session: 86400, Interaction: 3600, Grant: 86400 },
 });
 provider.proxy = true;
