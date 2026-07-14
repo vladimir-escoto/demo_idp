@@ -1,0 +1,50 @@
+/* Tripleenable — branding del login de Keycloak (override sobre el theme base). */
+:root{ --te-bg:#0b1020; --te-card:#141c30; --te-line:#243049; --te-tx:#e7ecf5; --te-mut:#93a1bd; --te-acc:#a855f7; --te-acc2:#34d399; }
+
+body.login-pf, .login-pf body, body{
+  background:radial-gradient(1100px 550px at 80% -10%, #241640, transparent 60%), var(--te-bg) !important;
+  color:var(--te-tx) !important;
+}
+.login-pf-page{ padding-top:40px; }
+
+/* wordmark en vez del logo por defecto */
+#kc-header, .login-pf-page-header{ text-align:center; }
+#kc-header-wrapper{
+  color:transparent !important; position:relative; font-size:0;
+}
+#kc-header-wrapper::after{
+  content:"Tripleenable ID"; display:block; font-size:22px; font-weight:800; letter-spacing:.3px;
+  color:var(--te-tx); padding:6px 0 2px;
+}
+#kc-header-wrapper::before{
+  content:"T"; display:inline-grid; place-items:center; width:40px; height:40px; margin-bottom:10px;
+  border-radius:11px; background:linear-gradient(135deg,var(--te-acc),var(--te-acc2)); color:#0b1020; font-size:22px; font-weight:900;
+}
+
+/* tarjeta */
+.card-pf{
+  background:linear-gradient(180deg,#16203a,#131b2e) !important; border:1px solid var(--te-line) !important;
+  border-radius:18px !important; box-shadow:0 24px 70px -30px #000 !important; color:var(--te-tx);
+}
+#kc-page-title, .card-pf h1, label, #kc-form-options, .login-pf-page .login-pf-header h1{ color:var(--te-tx) !important; }
+label, .control-label, #kc-info-message p{ color:var(--te-mut) !important; }
+
+/* inputs */
+input[type=text], input[type=password], input[type=email], .form-control{
+  background:#0e1626 !important; border:1px solid var(--te-line) !important; color:var(--te-tx) !important; border-radius:10px !important;
+}
+input:focus, .form-control:focus{ border-color:var(--te-acc) !important; box-shadow:0 0 0 3px rgba(168,85,247,.25) !important; }
+
+/* botones */
+.btn-primary, input[type=submit].btn-primary{
+  background:var(--te-acc) !important; border-color:var(--te-acc) !important; color:#0b1020 !important;
+  font-weight:800 !important; border-radius:10px !important;
+}
+.btn-primary:hover{ filter:brightness(1.08); }
+a, a:hover{ color:var(--te-acc) !important; }
+
+/* IdP social buttons (login con Tripleenable ID) */
+#kc-social-providers a, .zocial{
+  background:#1b2540 !important; border:1px solid var(--te-line) !important; color:var(--te-tx) !important; border-radius:10px !important;
+}
+#kc-social-providers a:hover{ border-color:var(--te-acc) !important; }
