@@ -1,13 +1,14 @@
 {
   "name": "tripleenable-global-idp",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
-  "description": "Tripleenable ID — OIDC Provider passwordless (QR / push approval)",
+  "description": "Tripleenable ID — OIDC Provider passwordless (wallet: firma Ed25519 + QR + push MQTT)",
   "main": "server.js",
   "scripts": { "start": "node server.js" },
   "dependencies": {
     "oidc-provider": "^8.5.1",
-    "qrcode": "^1.5.3"
+    "qrcode": "^1.5.3",
+    "mqtt": "^5.10.1"
   },
   "engines": { "node": ">=18" }
 }
