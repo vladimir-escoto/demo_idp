@@ -149,10 +149,11 @@ const server = http.createServer(async (req, res) => {
     const rows = list.length ? list.map((x) => { const h = x.human || {}; const p = h.profile || {}; return `<tr><td><b>${esc(p.displayName || x.userName)}</b></td><td>${esc(x.userName)}</td><td>${esc((h.email && h.email.email) || '')}</td><td><span class="pill">${esc(x.state || '')}</span></td></tr>`; }).join('') : `<tr><td colspan="4" class="empty">Sin usuarios (status ${r.status})</td></tr>`;
     return send(200, shell('Usuarios', `${msg(q)}<h1>Usuarios · ${esc(sess.orgName)}</h1><p class="sub">Miembros del tenant. Los globales del sistema son <code>user@idp.tripleenable.com</code>.</p>
       <div class="card"><table><tr><th>Nombre</th><th>Login</th><th>Email</th><th>Estado</th></tr>${rows}</table></div>
-      <div class="card"><form method="post" action="/users/create"><h1 style="font-size:16px">Crear usuario</h1><div class="row"><div><label>Usuario</label><input name="username" required></div><div><label>Email</label><input name="email" type="email" required></div></div><div class="row"><div><label>Nombre</label><input name="given" required></div><div><label>Apellido</label><input name="family" required></div></div><button class="btn">Crear usuario</button></form></div>`, sess));
+      <div class="card"><form method="post" action="/users/create"><input type="hidden" name="org" value="${esc(sess.org)}"><h1 style="font-size:16px">Crear usuario</h1><div class="row"><div><label>Usuario</label><input name="username" required></div><div><label>Email</label><input name="email" type="email" required></div></div><div class="row"><div><label>Nombre</label><input name="given" required></div><div><label>Apellido</label><input name="family" required></div></div><button class="btn">Crear usuario</button></form></div>`, sess));
   }
   if (u.pathname === '/users/create' && req.method === 'POST') {
     const f = form(await readBody(req));
+    if (f.org) sess.org = f.org; // robusto: el org viene del form, no depende de la sesión
     const r = await api(sess, 'POST', '/v2/users/human', { username: f.username, organization: { orgId: sess.org }, profile: { givenName: f.given, familyName: f.family }, email: { email: f.email, isVerified: true } });
     return send(302, '', { Location: r.status < 300 ? '/users?ok=' + encodeURIComponent('Usuario creado') : '/users?err=' + encodeURIComponent('Error ' + r.status + ': ' + JSON.stringify(r.body)) });
   }
@@ -164,10 +165,11 @@ const server = http.createServer(async (req, res) => {
     const rows = list.length ? list.map((p) => `<tr><td><b>${esc(p.name)}</b></td><td><code>${esc(p.id)}</code></td><td><a class="btn sec" href="/apps?project=${esc(p.id)}">Apps</a></td></tr>`).join('') : `<tr><td colspan="3" class="empty">Sin proyectos (status ${r.status})</td></tr>`;
     return send(200, shell('Proyectos', `${msg(q)}<h1>Proyectos · ${esc(sess.orgName)}</h1><p class="sub">Un proyecto agrupa apps y roles dentro del tenant.</p>
       <div class="card"><table><tr><th>Nombre</th><th>ID</th><th></th></tr>${rows}</table></div>
-      <div class="card"><form method="post" action="/projects/create"><h1 style="font-size:16px">Crear proyecto</h1><label>Nombre</label><input name="name" required><button class="btn">Crear proyecto</button></form></div>`, sess));
+      <div class="card"><form method="post" action="/projects/create"><input type="hidden" name="org" value="${esc(sess.org)}"><h1 style="font-size:16px">Crear proyecto</h1><label>Nombre</label><input name="name" required><button class="btn">Crear proyecto</button></form></div>`, sess));
   }
   if (u.pathname === '/projects/create' && req.method === 'POST') {
     const f = form(await readBody(req));
+    if (f.org) sess.org = f.org;
     const r = await api(sess, 'POST', '/management/v1/projects', { name: f.name });
     return send(302, '', { Location: r.status < 300 ? '/projects?ok=' + encodeURIComponent('Proyecto creado') : '/projects?err=' + encodeURIComponent('Error ' + r.status + ': ' + JSON.stringify(r.body)) });
   }
@@ -182,10 +184,11 @@ const server = http.createServer(async (req, res) => {
     const opts = projects.map((p) => `<option value="${esc(p.id)}" ${p.id === pid ? 'selected' : ''}>${esc(p.name)}</option>`).join('');
     return send(200, shell('Apps', `${msg(q)}<h1>Aplicaciones · ${esc(sess.orgName)}</h1><p class="sub">Apps OIDC del proyecto del tenant.</p>
       <div class="card"><form method="get" action="/apps"><label>Proyecto</label><select name="project" onchange="this.form.submit()">${opts}</select></form><table style="margin-top:14px"><tr><th>Nombre</th><th>Tipo</th><th>Client ID</th></tr>${rows}</table></div>
-      ${pid ? `<div class="card"><form method="post" action="/apps/create"><input type="hidden" name="project" value="${esc(pid)}"><h1 style="font-size:16px">Crear app OIDC</h1><div class="row"><div><label>Nombre</label><input name="name" required></div><div><label>Redirect URI</label><input name="redirect" placeholder="https://app/callback" required></div></div><button class="btn">Crear app</button></form></div>` : ''}`, sess));
+      ${pid ? `<div class="card"><form method="post" action="/apps/create"><input type="hidden" name="project" value="${esc(pid)}"><input type="hidden" name="org" value="${esc(sess.org)}"><h1 style="font-size:16px">Crear app OIDC</h1><div class="row"><div><label>Nombre</label><input name="name" required></div><div><label>Redirect URI</label><input name="redirect" placeholder="https://app/callback" required></div></div><button class="btn">Crear app</button></form></div>` : ''}`, sess));
   }
   if (u.pathname === '/apps/create' && req.method === 'POST') {
     const f = form(await readBody(req));
+    if (f.org) sess.org = f.org;
     const r = await api(sess, 'POST', `/management/v1/projects/${f.project}/apps/oidc`, { name: f.name, redirectUris: [f.redirect], responseTypes: ['OIDC_RESPONSE_TYPE_CODE'], grantTypes: ['OIDC_GRANT_TYPE_AUTHORIZATION_CODE'], appType: 'OIDC_APP_TYPE_WEB', authMethodType: 'OIDC_AUTH_METHOD_TYPE_BASIC' });
     return send(302, '', { Location: r.status < 300 ? '/apps?project=' + f.project + '&ok=' + encodeURIComponent('App creada') : '/apps?project=' + f.project + '&err=' + encodeURIComponent('Error ' + r.status + ': ' + JSON.stringify(r.body)) });
   }
