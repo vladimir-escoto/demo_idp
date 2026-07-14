@@ -49,6 +49,9 @@ jwk.use = 'sig'; jwk.alg = 'RS256'; jwk.kid = crypto.randomBytes(8).toString('he
 const provider = new Provider(ISSUER, {
   clients, jwks: { keys: [jwk] }, cookies: { keys: [COOKIE_KEY] },
   pkce: { required: () => false },
+  // id_token auto-contenido: incluye name/email/preferred_username en el propio id_token,
+  // así el broker (Zitadel) puede mapear el usuario sin depender del endpoint userinfo.
+  conformIdTokenClaims: false,
   features: { devInteractions: { enabled: false }, rpInitiatedLogout: { enabled: true }, revocation: { enabled: true }, userinfo: { enabled: true } },
   claims: { openid: ['sub'], profile: ['name', 'preferred_username'], email: ['email', 'email_verified'] },
   interactions: { url(ctx, i) { return `/interaction/${i.uid}`; } },
