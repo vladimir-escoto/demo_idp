@@ -10,17 +10,49 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import 'package:mqtt_client/mqtt_client.dart';
 import 'package:mqtt_client/mqtt_browser_client.dart';
 
-const idpUrl = String.fromEnvironment('IDP_URL', defaultValue: 'https://id.idp.tripleenable.com');
-const mqttUrl = String.fromEnvironment('MQTT_URL', defaultValue: 'wss://broker.emqx.io/mqtt');
-const mqttPort = int.fromEnvironment('MQTT_PORT', defaultValue: 8084);
+// Config en runtime: se lee /config.json al abrir, así UN SOLO build sirve a los
+// 3 escenarios (Zitadel/Keycloak/Authentik). Fallback a estos defaults (Zitadel).
+class Cfg {
+  static String idpUrl = 'https://id.idp.tripleenable.com';
+  static String mqttUrl = 'wss://broker.emqx.io/mqtt';
+  static int mqttPort = 8084;
+  static String mqttPrefix = 'tripleenable/idp/push';
+  static String broker = ''; // etiqueta visible del broker
+  static Color accent = const Color(0xFF5B9DFF);
+}
 
-const accent = Color(0xFF5B9DFF);
+Color get accent => Cfg.accent;
 const ok = Color(0xFF34D399);
 const bg = Color(0xFF0B1020);
 const card = Color(0xFF141C30);
 const line = Color(0xFF243049);
 
-void main() => runApp(const WalletApp());
+Color _hex(dynamic v) {
+  var s = '$v'.replaceAll('#', '').trim();
+  if (s.length == 6) s = 'FF$s';
+  return Color(int.parse(s, radix: 16));
+}
+
+Future<void> _loadConfig() async {
+  try {
+    final r = await http.get(Uri.parse('config.json'));
+    if (r.statusCode == 200) {
+      final j = jsonDecode(r.body) as Map<String, dynamic>;
+      Cfg.idpUrl = (j['idpUrl'] ?? Cfg.idpUrl).toString();
+      Cfg.mqttUrl = (j['mqttUrl'] ?? Cfg.mqttUrl).toString();
+      Cfg.mqttPort = int.tryParse('${j['mqttPort']}') ?? Cfg.mqttPort;
+      Cfg.mqttPrefix = (j['mqttPrefix'] ?? Cfg.mqttPrefix).toString();
+      Cfg.broker = (j['broker'] ?? Cfg.broker).toString();
+      if (j['accent'] != null) Cfg.accent = _hex(j['accent']);
+    }
+  } catch (_) {}
+}
+
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await _loadConfig();
+  runApp(const WalletApp());
+}
 
 class WalletApp extends StatelessWidget {
   const WalletApp({super.key});
@@ -30,7 +62,7 @@ class WalletApp extends StatelessWidget {
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark(useMaterial3: true).copyWith(
           scaffoldBackgroundColor: bg,
-          colorScheme: const ColorScheme.dark(primary: accent, surface: card),
+          colorScheme: ColorScheme.dark(primary: accent, surface: card),
         ),
         home: const Gate(),
       );
@@ -50,7 +82,7 @@ class Wallet {
     final pub = await kp.extractPublicKey();
     final x = base64Url.encode(pub.bytes).replaceAll('=', '');
     final w = Wallet(username, kp, x);
-    await http.post(Uri.parse('$idpUrl/device/register'),
+    await http.post(Uri.parse('${Cfg.idpUrl}/device/register'),
         headers: {'Content-Type': 'application/json'},
         body: jsonEncode({'username': username, 'name': username, 'jwk': {'kty': 'OKP', 'crv': 'Ed25519', 'x': x}}));
     return w;
@@ -133,15 +165,15 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> _connectMqtt() async {
-    _mqtt = MqttBrowserClient(mqttUrl, 'wallet-${widget.wallet.username}-${DateTime.now().millisecondsSinceEpoch}');
-    _mqtt.port = mqttPort;
+    _mqtt = MqttBrowserClient(Cfg.mqttUrl, 'wallet-${widget.wallet.username}-${DateTime.now().millisecondsSinceEpoch}');
+    _mqtt.port = Cfg.mqttPort;
     _mqtt.logging(on: false);
     _mqtt.keepAlivePeriod = 30;
     _mqtt.onConnected = () => setState(() => _mqttState = 'push activo');
     _mqtt.onDisconnected = () => setState(() => _mqttState = 'desconectado');
     try {
       await _mqtt.connect();
-      _mqtt.subscribe('tripleenable/idp/push/${widget.wallet.username}', MqttQos.atMostOnce);
+      _mqtt.subscribe('${Cfg.mqttPrefix}/${widget.wallet.username}', MqttQos.atMostOnce);
       _mqtt.updates!.listen((events) {
         final rec = events[0].payload as MqttPublishMessage;
         final msg = MqttPublishPayload.bytesToStringAsString(rec.payload.message);
@@ -156,7 +188,7 @@ class _HomeState extends State<Home> {
   }
 
   Future<void> _respond(Map<String, dynamic> req, bool approve) async {
-    final idp = (req['idp'] ?? idpUrl).toString();
+    final idp = (req['idp'] ?? Cfg.idpUrl).toString();
     final body = <String, dynamic>{'username': widget.wallet.username, 'uid': req['uid']};
     if (approve) {
       body['signature'] = await widget.wallet.sign(req['nonce'].toString());
@@ -276,13 +308,21 @@ class _Logo extends StatelessWidget {
   const _Logo();
   @override
   Widget build(BuildContext context) => Row(children: [
-        Container(width: 38, height: 38, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: const LinearGradient(colors: [accent, ok])),
+        Container(width: 38, height: 38, decoration: BoxDecoration(borderRadius: BorderRadius.circular(10), gradient: LinearGradient(colors: [accent, ok])),
             child: const Center(child: Text('T', style: TextStyle(color: bg, fontWeight: FontWeight.w900, fontSize: 20)))),
         const SizedBox(width: 10),
         const Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
           Text('Tripleenable Wallet', style: TextStyle(fontWeight: FontWeight.w800, fontSize: 15)),
           Text('autenticador soberano', style: TextStyle(color: Color(0xFF93A1BD), fontSize: 11)),
         ]),
+        if (Cfg.broker.isNotEmpty) ...[
+          const Spacer(),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(color: accent, borderRadius: BorderRadius.circular(999)),
+            child: Text('via ${Cfg.broker}', style: const TextStyle(color: bg, fontWeight: FontWeight.w800, fontSize: 11)),
+          ),
+        ],
       ]);
 }
 

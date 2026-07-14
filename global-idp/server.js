@@ -22,12 +22,16 @@ const ISSUER = (process.env.OIDC_ISSUER || 'https://id.idp.tripleenable.com').re
 const PORT = parseInt(process.env.PORT || '3000', 10);
 const COOKIE_KEY = process.env.COOKIE_KEY || crypto.randomBytes(24).toString('hex');
 const MQTT_URL = process.env.MQTT_URL || 'wss://broker.emqx.io:8084/mqtt';
-const PUSH_TOPIC = (u) => 'tripleenable/idp/push/' + u; // topic distintivo en el broker público
+const PUSH_PREFIX = (process.env.PUSH_TOPIC_PREFIX || 'tripleenable/idp/push').replace(/\/$/, '');
+const PUSH_TOPIC = (u) => PUSH_PREFIX + '/' + u; // prefijo por escenario para no colisionar en el broker público
+// Branding por escenario (para distinguir visualmente Zitadel/Keycloak/Authentik)
+const BRAND_ACCENT = process.env.BRAND_ACCENT || '#5b9dff';
+const BRAND_BROKER = process.env.BRAND_BROKER || '';
 
 // Usuarios "semilla" (siempre presentes). El wallet añade más en runtime.
 const USERS = {
-  ana:   { name: 'Ana Global',   email: 'ana@global.tripleenable.com',   preferred_username: 'ana' },
-  bruno: { name: 'Bruno Dev',    email: 'bruno@global.tripleenable.com', preferred_username: 'bruno' },
+  ana:   { name: 'Ana Global', given_name: 'Ana',   family_name: 'Global', email: 'ana@global.tripleenable.com',   preferred_username: 'ana' },
+  bruno: { name: 'Bruno Dev',  given_name: 'Bruno', family_name: 'Dev',    email: 'bruno@global.tripleenable.com', preferred_username: 'bruno' },
 };
 const devices = new Map(); // username -> { jwk, name }
 
@@ -54,10 +58,15 @@ const provider = new Provider(ISSUER, {
   // así el broker (Zitadel) puede mapear el usuario sin depender del endpoint userinfo.
   conformIdTokenClaims: false,
   features: { devInteractions: { enabled: false }, rpInitiatedLogout: { enabled: true }, revocation: { enabled: true }, userinfo: { enabled: true } },
-  claims: { openid: ['sub'], profile: ['name', 'preferred_username'], email: ['email', 'email_verified'] },
+  claims: { openid: ['sub'], profile: ['name', 'preferred_username', 'given_name', 'family_name'], email: ['email', 'email_verified'] },
   interactions: { url(ctx, i) { return `/interaction/${i.uid}`; } },
   async findAccount(ctx, id) {
-    const u = USERS[id] || (devices.has(id) ? { name: devices.get(id).name || id, email: id + '@wallet.tripleenable.com', preferred_username: id } : null);
+    let u = USERS[id];
+    if (!u && devices.has(id)) {
+      const nm = devices.get(id).name || id; const parts = nm.trim().split(/\s+/);
+      u = { name: nm, given_name: parts[0] || id, family_name: parts.slice(1).join(' ') || 'Wallet',
+            email: id + '@wallet.tripleenable.com', preferred_username: id };
+    }
     if (!u) return undefined;
     return { accountId: id, async claims() { return { sub: id, email_verified: true, ...u }; } };
   },
@@ -106,9 +115,10 @@ function cors() { return { 'Access-Control-Allow-Origin': '*', 'Access-Control-A
 
 function shell(title, body) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>
-   :root{--bg:#0b1020;--line:#243049;--tx:#e7ecf5;--mut:#93a1bd;--acc:#5b9dff;--ok:#34d399}
+   :root{--bg:#0b1020;--line:#243049;--tx:#e7ecf5;--mut:#93a1bd;--acc:${BRAND_ACCENT};--ok:#34d399}
    *{box-sizing:border-box}body{margin:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:radial-gradient(1000px 500px at 80% -10%,#16233f,transparent 60%),#0b1020;color:var(--tx);min-height:100vh;display:grid;place-items:center;padding:24px}
-   .card{background:linear-gradient(180deg,#16203a,#131b2e);border:1px solid var(--line);border-radius:20px;padding:28px;max-width:440px;width:100%;box-shadow:0 24px 70px -30px #000}
+   .card{position:relative;background:linear-gradient(180deg,#16203a,#131b2e);border:1px solid var(--line);border-radius:20px;padding:28px;max-width:440px;width:100%;box-shadow:0 24px 70px -30px #000}
+   .brk{position:absolute;top:-11px;left:50%;transform:translateX(-50%);background:var(--acc);color:#0b1020;font-weight:800;font-size:11px;letter-spacing:.5px;text-transform:uppercase;padding:4px 12px;border-radius:999px;box-shadow:0 6px 16px -6px var(--acc)}
    .logo{display:flex;align-items:center;gap:10px;margin-bottom:16px}.logo .mk{width:34px;height:34px;border-radius:9px;background:linear-gradient(135deg,var(--acc),#34d399);display:grid;place-items:center;font-weight:900;color:#0b1020}.logo b{font-size:15px}.logo small{display:block;color:var(--mut);font-size:11px}
    h1{font-size:20px;margin:2px 0 6px}p{color:var(--mut);line-height:1.5;margin:0 0 14px;font-size:13.5px}
    .qr{background:#fff;border-radius:16px;padding:14px;display:grid;place-items:center;margin:6px 0 12px}.qr img{width:206px;height:206px;display:block}
@@ -116,7 +126,7 @@ function shell(title, body) {
    .div{display:flex;align-items:center;gap:10px;color:var(--mut);font-size:12px;margin:14px 0}.div::before,.div::after{content:'';flex:1;height:1px;background:var(--line)}
    input{width:100%;background:#0e1626;border:1px solid var(--line);color:var(--tx);border-radius:11px;padding:12px;font-size:14px}
    .btn{display:block;width:100%;text-align:center;background:var(--acc);color:#0b1020;font-weight:800;border:0;border-radius:11px;padding:12px;font-size:14px;cursor:pointer;margin-top:9px;text-decoration:none}
-  </style></head><body><div class="card"><div class="logo"><div class="mk">T</div><div><b>Tripleenable ID</b><small>login soberano · firma en el dispositivo</small></div></div>${body}</div></body></html>`;
+  </style></head><body><div class="card">${BRAND_BROKER ? `<span class="brk">via ${BRAND_BROKER}</span>` : ''}<div class="logo"><div class="mk">T</div><div><b>Tripleenable ID</b><small>login soberano · firma en el dispositivo</small></div></div>${body}</div></body></html>`;
 }
 
 async function handle(req, res) {
