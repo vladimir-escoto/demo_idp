@@ -67,4 +67,14 @@ $KcAdm create clients -r care \
   -s "webOrigins=[\"$CARE_STORE_URL\"]" \
   2>/dev/null || echo "   client ya existe"
 
-echo ">> OK realm 'care' configurado (IdP=tripleenable, client=care-store)"
+echo ">> crear client 'tenant-admin' (panel de administración) en master"
+$KcAdm create clients -r master \
+  -s clientId=tenant-admin -s name="Tenant Admin (panel)" -s enabled=true \
+  -s protocol=openid-connect -s publicClient=false -s secret=tenant-admin-kc-secret \
+  -s standardFlowEnabled=true -s directAccessGrantsEnabled=false \
+  -s 'redirectUris=["https://admin-keycloak.idp.tripleenable.com/callback"]' \
+  -s 'webOrigins=["https://admin-keycloak.idp.tripleenable.com"]' \
+  2>/dev/null || echo "   client tenant-admin (master) ya existe"
+
+echo ">> OK. realm 'care' (IdP=tripleenable, client=care-store) + client 'tenant-admin' en master."
+echo "   Panel Keycloak: entra en https://admin-keycloak.idp.tripleenable.com con tu admin de master."
