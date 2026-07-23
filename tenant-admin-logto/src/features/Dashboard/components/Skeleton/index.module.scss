@@ -1,0 +1,47 @@
+@use 'scss/underscore' as _;
+
+.title {
+  height: 24px;
+  margin-bottom: _.unit(6);
+  @include _.shimmering-animation;
+}
+
+.number {
+  height: 32px;
+  @include _.shimmering-animation;
+}
+
+.blocks {
+  display: flex;
+  align-items: center;
+  margin-bottom: _.unit(4);
+}
+
+.block {
+  flex: 1;
+
+  &:not(:last-child) {
+    margin-inline-end: _.unit(4);
+  }
+}
+
+.dau {
+  width: 300px;
+}
+
+.curve {
+  margin: _.unit(10) 0 _.unit(6);
+  height: 168px;
+  @include _.shimmering-animation;
+}
+
+.activeBlocks {
+  display: flex;
+  align-items: center;
+
+  .block {
+    border: 1px solid var(--color-divider);
+    width: 360px;
+    flex: unset;
+  }
+}

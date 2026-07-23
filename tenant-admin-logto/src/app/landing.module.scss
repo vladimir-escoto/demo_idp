@@ -1,0 +1,35 @@
+@use 'scss/underscore' as _;
+
+.container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background: var(--color-base);
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: _.unit(4);
+  width: 480px;
+  max-width: calc(100vw - #{_.unit(8)});
+  padding: _.unit(10);
+}
+
+.brand {
+  font: var(--font-label-2);
+  color: var(--color-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+}
+
+.title {
+  font: var(--font-title-1);
+  color: var(--color-text);
+}
+
+.subtitle {
+  font: var(--font-body-2);
+  color: var(--color-text-secondary);
+}

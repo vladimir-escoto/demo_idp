@@ -1,0 +1,40 @@
+@use 'scss/underscore' as _;
+
+.filter {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+
+  .title {
+    color: var(--color-text-secondary);
+    font: var(--font-body-2);
+  }
+
+  .eventSelector {
+    width: 300px;
+    margin-inline-start: _.unit(2);
+  }
+
+  .applicationSelector {
+    width: 250px;
+    margin-inline-start: _.unit(2);
+  }
+
+  .timeRangePicker {
+    margin-inline-start: _.unit(2);
+  }
+
+  // When the time-range picker is part of the filter row (especially in its
+  // custom-range state, which adds two date inputs), the row gets very wide.
+  // Shrink the upstream selectors a bit so the whole bar still fits without
+  // wrapping or pushing the table layout around.
+  &:has(.timeRangePicker) {
+    .eventSelector {
+      width: _.unit(60);
+    }
+
+    .applicationSelector {
+      width: _.unit(50);
+    }
+  }
+}

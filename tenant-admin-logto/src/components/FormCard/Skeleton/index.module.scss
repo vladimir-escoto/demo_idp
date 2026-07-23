@@ -1,0 +1,17 @@
+@use 'scss/underscore' as _;
+
+.title {
+  height: 16px;
+  width: 80px;
+  @include _.shimmering-animation;
+}
+
+.text {
+  width: 100%;
+  height: 10px;
+  @include _.shimmering-animation;
+}
+
+.text + .text {
+  margin-top: _.unit(2);
+}

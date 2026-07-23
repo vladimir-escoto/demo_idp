@@ -7,10 +7,10 @@
 import { usePathname, useRouter } from 'next/navigation';
 import { useCallback, useMemo } from 'react';
 
-import { resolveTo, type To } from '@/lib/router-shim';
+import { resolveRelative, resolveTo, type To } from '@/lib/router-shim';
 
 const useTenantPathname = () => {
-  const pathname = usePathname();
+  const pathname = usePathname() ?? '/';
   const router = useRouter();
 
   const match = useCallback(
@@ -28,13 +28,14 @@ const useTenantPathname = () => {
         router.back();
         return;
       }
+      const href = resolveRelative(resolveTo(to), pathname);
       if (options?.replace) {
-        router.replace(resolveTo(to));
+        router.replace(href);
       } else {
-        router.push(resolveTo(to));
+        router.push(href);
       }
     },
-    [router]
+    [router, pathname]
   );
 
   const getUrl = useCallback(

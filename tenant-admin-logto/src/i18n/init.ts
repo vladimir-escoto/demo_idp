@@ -28,6 +28,15 @@ const initI18n = async () => {
     i18next.addResourceBundle(language, 'translation', values.translation, true);
     i18next.addResourceBundle(language, 'errors', values.errors, true);
   }
+
+  // Portal-specific keys layered on top of the console phrases.
+  const overlays: Record<string, Record<string, unknown>> = {
+    en: { admin_console: { tabs: { members: 'Members', org_settings: 'Settings' } } },
+    es: { admin_console: { tabs: { members: 'Miembros', org_settings: 'Configuración' } } },
+  };
+  for (const [language, overlay] of Object.entries(overlays)) {
+    i18next.addResourceBundle(language, 'translation', overlay, true, true);
+  }
 };
 
 export default initI18n;

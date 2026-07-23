@@ -1,19 +1,18 @@
-'use client';
+import { redirect } from 'next/navigation';
 
-import Button from '@/ds-components/Button';
-import Card from '@/ds-components/Card';
-import CardTitle from '@/ds-components/CardTitle';
-import Spacer from '@/ds-components/Spacer';
+import { getTenantSession } from '@/lib/session';
 
-/** Temporary smoke-test page; replaced by the console shell + dashboard. */
-export default function Home() {
-  return (
-    <div style={{ padding: 24, maxWidth: 720 }}>
-      <Card>
-        <CardTitle title="general.settings_nav" subtitle="general.loading" />
-        <Spacer />
-        <Button title="general.create" type="primary" size="large" onClick={() => {}} />
-      </Card>
-    </div>
-  );
+import { signInAction } from './actions';
+import Landing from './landing';
+
+/** Landing: authenticated org members go straight to the dashboard. */
+export default async function Home() {
+  const session = await getTenantSession();
+  const hasOrg = Boolean(session?.orgId);
+
+  if (hasOrg) {
+    redirect('/dashboard');
+  }
+
+  return <Landing hasSessionWithoutOrg={Boolean(session)} onSignIn={signInAction} />;
 }

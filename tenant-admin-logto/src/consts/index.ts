@@ -1,4 +1,8 @@
 export * from './env';
+export * from './logs';
+
+/** Docs paths used by vendored components (relative to docs.logto.io). */
+export const auditLogs = '/developers/audit-logs';
 
 export const storageKeys = Object.freeze({
   appearanceMode: 'logto:tenant_admin:appearance_mode',
