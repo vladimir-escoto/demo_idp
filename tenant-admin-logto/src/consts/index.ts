@@ -3,6 +3,7 @@ export * from './logs';
 export * from './oidc';
 export * from './page-tabs';
 export * from './external-links';
+export * from './applications';
 
 export const storageKeys = Object.freeze({
   appearanceMode: 'logto:tenant_admin:appearance_mode',
