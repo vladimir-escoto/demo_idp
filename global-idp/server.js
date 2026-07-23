@@ -45,6 +45,12 @@ const clients = [
   { client_id: 'authentik', client_secret: process.env.CLIENT_SECRET_AUTHENTIK || 'authentik-tripleenable-idp-secret',
     grant_types: ['authorization_code'], response_types: ['code'],
     redirect_uris: (process.env.REDIRECT_AUTHENTIK || 'https://authentik.idp.tripleenable.com/source/oauth/callback/tripleenable/').split(',') },
+  // Logto ingiere este IdP como conector social OIDC estándar. El redirect es el
+  // callback del conector: https://logto.idp.tripleenable.com/callback/<connectorId>
+  // (el connectorId lo genera Logto al crear el conector — se fija vía REDIRECT_LOGTO).
+  { client_id: 'logto', client_secret: process.env.CLIENT_SECRET_LOGTO || 'logto-tripleenable-idp-secret',
+    grant_types: ['authorization_code'], response_types: ['code'],
+    redirect_uris: (process.env.REDIRECT_LOGTO || 'https://logto.idp.tripleenable.com/callback/logto').split(',') },
 ];
 
 const { privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });

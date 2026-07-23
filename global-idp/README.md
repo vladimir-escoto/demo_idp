@@ -26,7 +26,9 @@ aprueba. Passwordless de punta a punta.
 | `CLIENT_SECRET_ZITADEL` | *(demo)* | Secret del cliente `zitadel` |
 | `CLIENT_SECRET_KEYCLOAK` | *(demo)* | Secret del cliente `keycloak` |
 | `CLIENT_SECRET_AUTHENTIK` | *(demo)* | Secret del cliente `authentik` |
+| `CLIENT_SECRET_LOGTO` | *(demo)* | Secret del cliente `logto` |
 | `REDIRECT_ZITADEL` / `REDIRECT_KEYCLOAK` / `REDIRECT_AUTHENTIK` | *(callbacks conocidos)* | Redirect URIs (coma-separadas) por broker |
+| `REDIRECT_LOGTO` | `.../callback/logto` | Callback del conector OIDC de Logto: `https://logto.idp.tripleenable.com/callback/<connectorId>` |
 
 Usuarios demo: `ana`, `bruno`, `carla` (globales).
 
