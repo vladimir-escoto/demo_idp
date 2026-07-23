@@ -56,6 +56,10 @@ const forward = async (
   const totalNumber = upstream.headers.get('total-number');
   if (contentType) headers.set('content-type', contentType);
   if (totalNumber) headers.set('total-number', totalNumber);
+  // 204/205/304 must not carry a body (Response constructor throws otherwise).
+  if ([204, 205, 304].includes(upstream.status)) {
+    return new NextResponse(null, { status: upstream.status, headers });
+  }
   return new NextResponse(body, { status: upstream.status, headers });
 };
 
@@ -180,7 +184,8 @@ const logs = async (orgId: string, request: NextRequest) => {
   // No entity filter: fetch a window and filter it down to this org.
   const page = Number(params.get('page') ?? '1');
   const pageSize = Number(params.get('page_size') ?? '20');
-  const upstreamParams = new URLSearchParams({ page: '1', page_size: '200' });
+  // Logto caps page_size at 100.
+  const upstreamParams = new URLSearchParams({ page: '1', page_size: '100' });
   const logKey = params.get('logKey');
   if (logKey) upstreamParams.set('logKey', logKey);
 
@@ -201,7 +206,20 @@ const logs = async (orgId: string, request: NextRequest) => {
 
 // --- Dispatcher ---
 
-const handle = async (request: NextRequest, { params }: { params: { path: string[] } }) => {
+const handle = async (request: NextRequest, context: { params: { path: string[] } }) => {
+  try {
+    return await handleInner(request, context);
+  } catch (error) {
+    console.error('[tenant-proxy]', error);
+    return jsonError(
+      502,
+      'proxy.upstream_error',
+      error instanceof Error ? error.message : 'Upstream request failed.'
+    );
+  }
+};
+
+const handleInner = async (request: NextRequest, { params }: { params: { path: string[] } }) => {
   const session = await getTenantSession();
   if (!session) {
     return jsonError(401, 'auth.unauthorized', 'Sign in required.');
@@ -294,6 +312,15 @@ const handle = async (request: NextRequest, { params }: { params: { path: string
       return forward(path, { method, body });
     }
     return jsonError(404, 'entity.not_found', 'Route not allowed.');
+  }
+
+  // Org member profile (read-only; only members of this organization)
+  if (method === 'GET' && segments[0] === 'api' && segments[1] === 'users' && segments.length === 3) {
+    const { memberIds } = await getOrgSets(orgId);
+    if (!memberIds.has(segments[2])) {
+      return jsonError(404, 'entity.not_found', 'User not found in this organization.');
+    }
+    return forward(path);
   }
 
   // Add member by exact identifier (portal-specific; avoids exposing the
