@@ -329,11 +329,24 @@ class _HomeState extends State<Home> {
     }
   }
 
-  /// Escanea un QR de login. Como el QR no dice el usuario, eliges la identidad.
+  /// Escanea un QR de login. Si el QR trae el usuario objetivo (login_hint del
+  /// broker), firma con esa identidad directamente; si no, eliges cuál.
   Future<void> _scan() async {
     final result = await Navigator.of(context).push<Map<String, dynamic>>(MaterialPageRoute(builder: (_) => const ScanPage()));
     if (result == null || !mounted) return;
-    final id = await _pickIdentity(result['client']?.toString());
+    Identity? id;
+    final hinted = result['user']?.toString();
+    if (hinted != null && hinted.isNotEmpty) {
+      id = _byUser(hinted);
+      if (id == null) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('No tienes la identidad "$hinted" en este dispositivo'), backgroundColor: const Color(0xFF334155)));
+        return;
+      }
+      final confirm = await _confirmDialog(result['client']?.toString(), id);
+      if (confirm != true) return;
+    } else {
+      id = await _pickIdentity(result['client']?.toString());
+    }
     if (id == null) return;
     await _respond(result, id, true);
   }

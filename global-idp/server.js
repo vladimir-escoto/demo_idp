@@ -190,21 +190,32 @@ async function handle(req, res) {
   if (m && !m[2]) { // login page (QR + push)
     let details; try { details = await provider.interactionDetails(req, res); } catch (e) { return page(res, 400, shell('Error', '<h1>Sesión expirada</h1><p>Reintenta el login.</p>')); }
     const uid = m[1]; const clientId = details.params.client_id;
+    // login_hint: el email que el usuario escribió en el broker (Logto) al ir por SSO.
+    // Nos dice QUIÉN intenta entrar, así dirigimos el push y el QR a esa identidad y el
+    // usuario no tiene que elegir cuenta en el wallet.
+    const loginHint = (details.params.login_hint || '').toString();
+    const hintedUser = loginHint.includes('@') ? loginHint.split('@')[0] : (loginHint || null);
+    console.log('interaction', uid, 'client', clientId, 'login_hint:', loginHint || '(none)');
     let r = requests.get(uid);
-    if (!r) { r = { client: clientId, status: 'pending', nonce: crypto.randomBytes(20).toString('hex'), ts: Date.now() }; requests.set(uid, r); }
-    const payload = JSON.stringify({ idp: ISSUER, uid, nonce: r.nonce, client: clientId });
+    if (!r) { r = { client: clientId, status: 'pending', nonce: crypto.randomBytes(20).toString('hex'), ts: Date.now(), hinted: hintedUser }; requests.set(uid, r); }
+    // El QR lleva el usuario objetivo → el wallet firma con esa identidad sin preguntar.
+    const payload = JSON.stringify({ idp: ISSUER, uid, nonce: r.nonce, client: clientId, user: hintedUser || undefined });
     const qr = await QRCode.toDataURL(payload, { margin: 1, width: 206 });
+    const who = hintedUser ? `la sesión de <b>${hintedUser}</b>` : 'tu sesión';
     return page(res, 200, shell('Aprobar login', `
       <h1>Aprueba con tu wallet</h1>
-      <p><b>${clientId}</b> quiere iniciar tu sesión. Escanea el QR con tu <b>wallet Tripleenable</b>
+      <p><b>${clientId}</b> quiere iniciar ${who}. Escanea el QR con tu <b>wallet Tripleenable</b>
       y firma. Sin contraseñas — tu llave privada nunca sale del dispositivo.</p>
       <div class="qr"><img alt="QR" src="${qr}"></div>
-      <div class="status"><span class="dot"></span><span id="s">Esperando firma del wallet…</span></div>
-      <div class="div">o simular push</div>
-      <input id="u" placeholder="usuario (p.ej. ana)"><button class="btn" onclick="push()">Enviar push al wallet</button>
+      <div class="status"><span class="dot"></span><span id="s">${hintedUser ? 'Enviando push a ' + hintedUser + '…' : 'Esperando firma del wallet…'}</span></div>
+      <div class="div">${hintedUser ? 'o reenviar push' : 'o enviar push'}</div>
+      <input id="u" placeholder="usuario (p.ej. ana)" value="${hintedUser || ''}"><button class="btn" onclick="push()">Enviar push al wallet</button>
       <script>
         const uid=${JSON.stringify(uid)};
+        const hinted=${JSON.stringify(hintedUser)};
         async function push(){const u=document.getElementById('u').value.trim();if(!u)return;await fetch('/interaction/'+uid+'/push',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:u})});document.getElementById('s').textContent='Push enviado a '+u+'… aprueba en el wallet.';}
+        // Si el broker nos dijo quién es (login_hint), enviamos el push automáticamente.
+        if(hinted){push();}
         setInterval(async()=>{const j=await (await fetch('/interaction/'+uid+'/status')).json();
           if(j.status==='approved'){document.getElementById('s').textContent='Firma válida ✓ entrando…';location.href='/interaction/'+uid+'/finish';}
           else if(j.status==='deny'){document.getElementById('s').textContent='Acceso rechazado en el wallet.';}},1500);
