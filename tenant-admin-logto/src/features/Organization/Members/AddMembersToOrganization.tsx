@@ -62,7 +62,7 @@ function AddMembersToOrganization({ organization, isOpen, onClose }: Props) {
       onRequestClose={onClose}
     >
       <ModalLayout
-        title="organization_details.add_members_to_organization"
+        title={<DangerousRaw>{`Add member to ${organization.name}`}</DangerousRaw>}
         subtitle={
           <DangerousRaw>
             Enter the exact username or email of an existing account to add it to “

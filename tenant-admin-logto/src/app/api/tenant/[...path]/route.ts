@@ -389,6 +389,21 @@ const handleInner = async (request: NextRequest, { params }: { params: { path: s
     if (appId) {
       const app = await getOrgApp(appId, orgId);
       if (!app) {
+        // Read-only name projection for apps referenced in this org's audit
+        // logs (e.g. the portal's own OIDC app) — lets the logs table show a
+        // real name instead of "(Deleted)", without exposing config/secrets.
+        if (method === 'GET' && segments.length === 3) {
+          const probe = await managementFetch(`api/applications/${appId}`);
+          if (probe.ok) {
+            const full = (await probe.json()) as AppRow;
+            return NextResponse.json({
+              id: full.id,
+              name: full.name,
+              type: full.type,
+              isThirdParty: Boolean(full.isThirdParty),
+            });
+          }
+        }
         return jsonError(404, 'entity.not_found', 'Application not found.');
       }
       const rest = segments.slice(3).join('/');
