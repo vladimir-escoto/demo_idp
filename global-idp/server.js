@@ -166,11 +166,17 @@ function shell(title, body) {
 async function handle(req, res) {
   const { pathname } = parse(req.url, true);
 
-  // Zitadel/otros brokers envían prompt=select_account, que node-oidc-provider no soporta
-  // y responde invalid_request. Saneamos: conservamos solo prompts soportados.
-  if (req.url.includes('prompt=')) {
+  // Login soberano SIN SSO silencioso: en el endpoint de autorización forzamos
+  // prompt=login para que cada acceso exija una firma fresca del wallet (ignora
+  // la sesión del navegador). En el resto saneamos el prompt: Zitadel/otros brokers
+  // mandan select_account, que node-oidc-provider no soporta y da invalid_request.
+  {
     const u = new URL(req.url, ISSUER);
-    if (u.searchParams.has('prompt')) {
+    const isAuthorize = u.pathname === '/auth' || u.pathname === '/authorize';
+    if (isAuthorize) {
+      u.searchParams.set('prompt', 'login'); // nunca reutilizar sesión: siempre pedir firma
+      req.url = u.pathname + u.search;
+    } else if (u.searchParams.has('prompt')) {
       const ok = u.searchParams.get('prompt').split(' ').filter((p) => ['login', 'consent', 'none'].includes(p));
       if (ok.length) u.searchParams.set('prompt', ok.join(' ')); else u.searchParams.delete('prompt');
       req.url = u.pathname + u.search;
