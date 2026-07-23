@@ -1,6 +1,7 @@
 import { redirect } from 'next/navigation';
 import { type ReactNode } from 'react';
 
+import { OrgDetailsProvider } from '@/features/Organization/context';
 import ConsoleShell from '@/layouts/ConsoleShell';
 import { managementJson } from '@/lib/management';
 import { getTenantSession } from '@/lib/session';
@@ -33,7 +34,7 @@ export default async function ConsoleLayout({ children }: { readonly children: R
       onSignOut={signOutAction}
     >
       {session.isOrgAdmin ? (
-        children
+        <OrgDetailsProvider orgId={session.orgId}>{children}</OrgDetailsProvider>
       ) : (
         <div style={{ padding: 24 }}>
           Your account belongs to “{orgName}” but does not have the <code>orgadmin</code> role, so

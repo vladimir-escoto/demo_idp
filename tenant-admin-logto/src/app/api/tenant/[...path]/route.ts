@@ -253,6 +253,11 @@ const handle = async (request: NextRequest, { params }: { params: { path: string
     return forward(`api/organization-roles${search}`);
   }
 
+  // Sign-in experience (read-only; used for the MFA hint in org settings)
+  if (method === 'GET' && path === 'api/sign-in-exp') {
+    return forward('api/sign-in-exp');
+  }
+
   // Organization-scoped paths: api/organizations/{id}/...
   if (segments[0] === 'api' && segments[1] === 'organizations') {
     const requestedOrg = segments[2];
