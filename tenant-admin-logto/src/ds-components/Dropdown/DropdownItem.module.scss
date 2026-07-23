@@ -1,0 +1,39 @@
+@use 'scss/underscore' as _;
+
+.item {
+  padding: _.unit(2);
+  border-radius: 6px;
+  font: var(--font-body-2);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  overflow: hidden;
+  gap: _.unit(4);
+
+  &:hover {
+    background: var(--color-hover);
+  }
+
+  &.danger {
+    color: var(--color-error);
+  }
+
+  &.disabled {
+    color: var(--color-text-secondary);
+    cursor: not-allowed;
+
+    &:hover {
+      background: transparent;
+    }
+  }
+
+  .icon {
+    display: flex;
+    align-items: center;
+  }
+}
+
+.tooltipAnchor {
+  display: block;
+  width: 100%;
+}

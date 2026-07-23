@@ -1,0 +1,55 @@
+@use 'scss/underscore' as _;
+
+.field {
+  &:not(:first-child) {
+    margin-top: _.unit(6);
+  }
+}
+
+.headline {
+  display: flex;
+  align-items: center;
+  margin-bottom: _.unit(2);
+
+  &.withLargeSpacing {
+    margin-bottom: _.unit(2);
+  }
+
+  .title {
+    font: var(--font-label-2);
+    color: var(--color-text);
+
+    .multiple {
+      margin-inline-start: _.unit(1);
+      font: var(--font-body-2);
+      color: var(--color-text-secondary);
+    }
+  }
+
+  .toggleTipButton {
+    margin-inline-start: _.unit(0.5);
+  }
+
+  .required {
+    font: var(--font-body-2);
+    color: var(--color-text-secondary);
+  }
+
+  .tagsWrapper {
+    display: flex;
+    align-items: center;
+    margin-inline-start: _.unit(2);
+    gap: _.unit(1);
+  }
+}
+
+.description {
+  font: var(--font-body-2);
+  color: var(--color-text-secondary);
+  margin-top: _.unit(1);
+
+  &.top {
+    margin-top: 0;
+    margin-bottom: _.unit(1);
+  }
+}

@@ -1,0 +1,101 @@
+// @ts-nocheck — vendored from logto-io/logto packages/console (typechecked upstream)
+'use client';
+
+import { Theme } from '@logto/schemas';
+import { condArray, noop, trySafe } from '@silverhand/essentials';
+import type { ReactNode } from 'react';
+import { useEffect, useMemo, useState, createContext } from 'react';
+
+import { storageKeys } from '@/consts';
+import type { AppearanceMode } from '@/types/appearance-mode';
+import { appearanceModeGuard, DynamicAppearanceMode } from '@/types/appearance-mode';
+
+import styles from './index.module.scss';
+
+type Props = {
+  readonly children: ReactNode;
+};
+
+type Context = {
+  theme: Theme;
+  setAppearanceMode: (mode: AppearanceMode) => void;
+  setThemeOverride: React.Dispatch<React.SetStateAction<Theme | undefined>>;
+};
+
+// SSR-safe: `window` is unavailable while Next.js prerenders client components.
+const getDarkThemeWatchMedia = () =>
+  typeof window === 'undefined' ? undefined : window.matchMedia('(prefers-color-scheme: dark)');
+const getThemeBySystemConfiguration = (): Theme =>
+  getDarkThemeWatchMedia()?.matches ? Theme.Dark : Theme.Light;
+
+export const buildDefaultAppearanceMode = (): AppearanceMode =>
+  trySafe(() => appearanceModeGuard.parse(localStorage.getItem(storageKeys.appearanceMode))) ??
+  DynamicAppearanceMode.System;
+
+const defaultAppearanceMode = buildDefaultAppearanceMode();
+
+const defaultTheme =
+  defaultAppearanceMode === DynamicAppearanceMode.System
+    ? getThemeBySystemConfiguration()
+    : defaultAppearanceMode;
+
+export const AppThemeContext = createContext<Context>({
+  theme: defaultTheme,
+  setAppearanceMode: noop,
+  setThemeOverride: noop,
+});
+
+export function AppThemeProvider({ children }: Props) {
+  const [theme, setTheme] = useState<Theme>(defaultTheme);
+  const [themeOverride, setThemeOverride] = useState<Theme>();
+  const [mode, setMode] = useState<AppearanceMode>(defaultAppearanceMode);
+
+  const setAppearanceMode = (mode: AppearanceMode) => {
+    setMode(mode);
+    localStorage.setItem(storageKeys.appearanceMode, mode);
+  };
+
+  useEffect(() => {
+    if (themeOverride) {
+      setTheme(themeOverride);
+
+      return;
+    }
+
+    if (mode !== DynamicAppearanceMode.System) {
+      setTheme(mode);
+
+      return;
+    }
+
+    const changeTheme = () => {
+      setTheme(getThemeBySystemConfiguration());
+    };
+
+    changeTheme();
+
+    const darkThemeWatchMedia = getDarkThemeWatchMedia();
+    darkThemeWatchMedia?.addEventListener('change', changeTheme);
+
+    return () => {
+      darkThemeWatchMedia?.removeEventListener('change', changeTheme);
+    };
+  }, [mode, themeOverride]);
+
+  // Set Theme Mode
+  useEffect(() => {
+    document.body.classList.remove(...condArray(styles.light, styles.dark));
+    document.body.classList.add(...condArray(styles[theme]));
+  }, [theme]);
+
+  const context = useMemo<Context>(
+    () => ({
+      theme,
+      setAppearanceMode,
+      setThemeOverride,
+    }),
+    [theme]
+  );
+
+  return <AppThemeContext.Provider value={context}>{children}</AppThemeContext.Provider>;
+}

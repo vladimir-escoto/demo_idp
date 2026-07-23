@@ -1,0 +1,33 @@
+@use 'scss/underscore' as _;
+
+.overlay {
+  position: fixed;
+  background: var(--color-overlay);
+  inset: 0;
+  overflow-y: auto;
+  padding: _.unit(3) 0;
+  @include _.z-index(modal);
+}
+
+.content {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  flex: 0 0;
+  min-height: 100%;
+
+  &:focus-visible {
+    outline: none;
+  }
+}
+
+.fullScreen {
+  position: fixed;
+  inset: 0;
+  @include _.z-index(modal);
+
+  &:focus-visible {
+    outline: none;
+  }
+}

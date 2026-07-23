@@ -1,0 +1,152 @@
+// @ts-nocheck — vendored from logto-io/logto packages/console (typechecked upstream)
+import classNames from 'classnames';
+import { useTranslation } from 'react-i18next';
+import ReactPaginate from 'react-paginate';
+
+import ArrowLeft from '@/assets/icons/arrow-left.svg?react';
+import ArrowRight from '@/assets/icons/arrow-right.svg?react';
+import useCacheValue from '@/hooks/use-cache-value';
+
+import Button from '../Button';
+import DangerousRaw from '../DangerousRaw';
+import FlipOnRtl from '../FlipOnRtl';
+
+import styles from './index.module.scss';
+
+export type Props = {
+  readonly page: number;
+  readonly totalCount?: number;
+  readonly pageSize: number;
+  readonly className?: string;
+  readonly mode?: 'normal' | 'pico';
+  readonly onChange?: (pageIndex: number) => void;
+  /**
+   * When `true`, `totalCount` is a lower bound (server short-circuited at a cap).
+   * Renders Prev/Next only — the numbered jumper and position label are hidden.
+   */
+  readonly isTotalCountCapped?: boolean;
+};
+
+function Pagination({
+  page,
+  totalCount,
+  pageSize,
+  className,
+  mode = 'normal',
+  onChange,
+  isTotalCountCapped,
+}: Props) {
+  const { t } = useTranslation(undefined, { keyPrefix: 'admin_console' });
+
+  /**
+   * Note:
+   * The `totalCount` will become `undefined` temporarily when fetching data on page changes, and this causes the pagination to disappear.
+   * Cache `totalCount` to solve this problem.
+   */
+  const cachedTotalCount = useCacheValue(totalCount) ?? 0;
+  const cachedIsTotalCountCapped = useCacheValue(isTotalCountCapped) ?? false;
+  const isPicoMode = mode === 'pico';
+
+  if (cachedIsTotalCountCapped) {
+    // Pico mode is intentionally not applied here — the `.pico` overrides
+    // target `.pagination` (ReactPaginate), which the capped path doesn't use.
+    return (
+      <div className={classNames(styles.container, className)}>
+        <div className={styles.cappedNav}>
+          <Button
+            className={styles.button}
+            size="small"
+            icon={
+              <FlipOnRtl>
+                <ArrowLeft />
+              </FlipOnRtl>
+            }
+            aria-label={t('general.back')}
+            disabled={page === 1}
+            onClick={() => {
+              onChange?.(page - 1);
+            }}
+          />
+          <Button
+            className={styles.button}
+            size="small"
+            icon={
+              <FlipOnRtl>
+                <ArrowRight />
+              </FlipOnRtl>
+            }
+            aria-label={t('general.next')}
+            onClick={() => {
+              onChange?.(page + 1);
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  const pageCount = Math.ceil(cachedTotalCount / pageSize);
+
+  if (pageCount <= 1) {
+    return null;
+  }
+
+  const min = (page - 1) * pageSize + 1;
+  const max = Math.min(page * pageSize, cachedTotalCount);
+
+  return (
+    <div className={classNames(styles.container, isPicoMode && styles.pico, className)}>
+      <div className={styles.positionInfo}>
+        {t('general.page_info', { min, max, total: cachedTotalCount })}
+      </div>
+      <ReactPaginate
+        className={styles.pagination}
+        pageCount={pageCount}
+        forcePage={page - 1}
+        pageLabelBuilder={(pageNumber: number) => (
+          <Button
+            type={pageNumber === page ? 'outline' : 'default'}
+            className={classNames(styles.button, pageNumber === page && styles.active)}
+            size="small"
+            title={<DangerousRaw>{pageNumber}</DangerousRaw>}
+          />
+        )}
+        previousLabel={
+          <Button
+            className={styles.button}
+            size="small"
+            icon={
+              <FlipOnRtl>
+                <ArrowLeft />
+              </FlipOnRtl>
+            }
+            disabled={page === 1}
+          />
+        }
+        nextLabel={
+          <Button
+            className={styles.button}
+            size="small"
+            icon={
+              <FlipOnRtl>
+                <ArrowRight />
+              </FlipOnRtl>
+            }
+            disabled={page === pageCount}
+          />
+        }
+        breakLabel={
+          <Button className={styles.button} size="small" title={<DangerousRaw>...</DangerousRaw>} />
+        }
+        disabledClassName={styles.disabled}
+        pageRangeDisplayed={isPicoMode ? -1 : undefined}
+        marginPagesDisplayed={isPicoMode ? 0 : undefined}
+        onPageChange={({ selected }) => {
+          onChange?.(selected + 1);
+        }}
+      />
+    </div>
+  );
+}
+
+export default Pagination;

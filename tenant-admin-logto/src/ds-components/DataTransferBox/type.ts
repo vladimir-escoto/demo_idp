@@ -1,0 +1,20 @@
+// @ts-nocheck — vendored from logto-io/logto packages/console (typechecked upstream)
+export type DataEntry = {
+  id: string;
+  name: string;
+};
+
+export type DataGroup<T extends DataEntry> = {
+  groupId: string;
+  groupName: string;
+  dataList: T[];
+  dataInfo?: string;
+  isLoading?: boolean;
+};
+
+type DataWithGroupInfo<T extends DataEntry> = T & {
+  groupId: string;
+  groupName: string;
+};
+
+export type SelectedDataEntry<T extends DataEntry> = T | DataWithGroupInfo<T>;
