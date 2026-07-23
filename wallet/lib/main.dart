@@ -3,6 +3,7 @@
 // Autentica firmando un reto: por QR (cámara) o por push (MQTT). La privada
 // nunca sale del dispositivo. El IdP verifica la firma de verdad.
 import 'dart:convert';
+import 'dart:html' as html;
 import 'package:flutter/material.dart';
 import 'package:cryptography/cryptography.dart';
 import 'package:http/http.dart' as http;
@@ -51,11 +52,14 @@ Future<void> _loadConfig() async {
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await _loadConfig();
-  runApp(const WalletApp());
+  // Si ya hay una identidad guardada en este dispositivo, entra directo.
+  final saved = await Wallet.load();
+  runApp(WalletApp(initialWallet: saved));
 }
 
 class WalletApp extends StatelessWidget {
-  const WalletApp({super.key});
+  final Wallet? initialWallet;
+  const WalletApp({super.key, this.initialWallet});
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'Tripleenable Wallet',
@@ -64,11 +68,12 @@ class WalletApp extends StatelessWidget {
           scaffoldBackgroundColor: bg,
           colorScheme: ColorScheme.dark(primary: accent, surface: card),
         ),
-        home: const Gate(),
+        home: initialWallet != null ? Home(wallet: initialWallet!) : const Gate(),
       );
 }
 
-/// Estado del wallet en memoria (se regenera cada vez que se abre la app).
+/// Identidad del wallet. La llave privada Ed25519 se persiste en el dispositivo
+/// (localStorage) para sobrevivir recargas y reinicios — nunca sale de aquí.
 class Wallet {
   final String username;
   final SimpleKeyPair keyPair;
@@ -76,16 +81,49 @@ class Wallet {
   Wallet(this.username, this.keyPair, this.jwkX);
 
   static final _ed = Ed25519();
+  static const _kUser = 'te_wallet_username';
+  static const _kSeed = 'te_wallet_seed'; // 32 bytes semilla Ed25519 (base64)
 
-  static Future<Wallet> create(String username) async {
-    final kp = await _ed.newKeyPair();
-    final pub = await kp.extractPublicKey();
-    final x = base64Url.encode(pub.bytes).replaceAll('=', '');
-    final w = Wallet(username, kp, x);
+  /// Registra (o re-registra, idempotente) la pública en el IdP.
+  Future<void> _register() async {
     await http.post(Uri.parse('${Cfg.idpUrl}/device/register'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'username': username, 'name': username, 'jwk': {'kty': 'OKP', 'crv': 'Ed25519', 'x': x}}));
+        body: jsonEncode({'username': username, 'name': username, 'jwk': {'kty': 'OKP', 'crv': 'Ed25519', 'x': jwkX}}));
+  }
+
+  static Future<String> _x(SimpleKeyPair kp) async =>
+      base64Url.encode((await kp.extractPublicKey()).bytes).replaceAll('=', '');
+
+  /// Crea una identidad nueva, la persiste y la registra en el IdP.
+  static Future<Wallet> create(String username) async {
+    final kp = await _ed.newKeyPair();
+    final seed = await kp.extractPrivateKeyBytes();
+    final w = Wallet(username, kp, await _x(kp));
+    html.window.localStorage[_kUser] = username;
+    html.window.localStorage[_kSeed] = base64.encode(seed);
+    await w._register();
     return w;
+  }
+
+  /// Reconstruye la identidad guardada en el dispositivo (o null si no hay).
+  static Future<Wallet?> load() async {
+    final user = html.window.localStorage[_kUser];
+    final seedB64 = html.window.localStorage[_kSeed];
+    if (user == null || seedB64 == null) return null;
+    try {
+      final kp = await _ed.newKeyPairFromSeed(base64.decode(seedB64));
+      final w = Wallet(user, kp, await _x(kp));
+      await w._register(); // re-registra por si el IdP se reinició sin persistencia
+      return w;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// Olvida la identidad de este dispositivo.
+  static void forget() {
+    html.window.localStorage.remove(_kUser);
+    html.window.localStorage.remove(_kSeed);
   }
 
   Future<String> sign(String nonce) async {
@@ -276,6 +314,17 @@ class _HomeState extends State<Home> {
                     ]),
                   ]),
                 )),
+            const SizedBox(height: 20),
+            Center(
+              child: TextButton.icon(
+                onPressed: () {
+                  Wallet.forget();
+                  Navigator.of(context).pushReplacement(MaterialPageRoute(builder: (_) => const Gate()));
+                },
+                icon: Icon(Icons.logout, size: 16, color: Colors.grey.shade500),
+                label: Text('Cerrar identidad en este dispositivo', style: TextStyle(color: Colors.grey.shade500)),
+              ),
+            ),
           ]),
         ),
       ),

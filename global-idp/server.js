@@ -13,6 +13,8 @@
  */
 const http = require('http');
 const crypto = require('crypto');
+const fs = require('fs');
+const path = require('path');
 const { parse } = require('url');
 const { Provider } = require('oidc-provider');
 const QRCode = require('qrcode');
@@ -27,13 +29,39 @@ const PUSH_TOPIC = (u) => PUSH_PREFIX + '/' + u; // prefijo por escenario para n
 // Branding por escenario (para distinguir visualmente Zitadel/Keycloak/Authentik)
 const BRAND_ACCENT = process.env.BRAND_ACCENT || '#5b9dff';
 const BRAND_BROKER = process.env.BRAND_BROKER || '';
+// Todas las identidades emiten email @EMAIL_DOMAIN — debe coincidir con el dominio
+// del Enterprise SSO de Logto (tripleenable.com) para que el login por dominio sea consistente.
+const EMAIL_DOMAIN = process.env.EMAIL_DOMAIN || 'tripleenable.com';
+const emailFor = (id) => id + '@' + EMAIL_DOMAIN;
 
 // Usuarios "semilla" (siempre presentes). El wallet añade más en runtime.
 const USERS = {
-  ana:   { name: 'Ana Global', given_name: 'Ana',   family_name: 'Global', email: 'ana@idp.tripleenable.com',   preferred_username: 'ana' },
-  bruno: { name: 'Bruno Dev',  given_name: 'Bruno', family_name: 'Dev',    email: 'bruno@idp.tripleenable.com', preferred_username: 'bruno' },
+  ana:   { name: 'Ana Global', given_name: 'Ana',   family_name: 'Global', email: emailFor('ana'),   preferred_username: 'ana' },
+  bruno: { name: 'Bruno Dev',  given_name: 'Bruno', family_name: 'Dev',    email: emailFor('bruno'), preferred_username: 'bruno' },
 };
-const devices = new Map(); // username -> { jwk, name }
+
+// Persistencia de dispositivos enrolados (username -> { jwk, name }) en un volumen.
+// Sin esto, un reinicio del contenedor obligaría a re-enrolar cada wallet.
+const DEVICES_FILE = process.env.DEVICES_FILE || '/data/devices.json';
+const devices = new Map();
+function loadDevices() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(DEVICES_FILE, 'utf8'));
+    for (const [u, d] of Object.entries(raw)) devices.set(u, d);
+    console.log('devices cargados:', devices.size, 'desde', DEVICES_FILE);
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('load devices', e.message);
+  }
+}
+function saveDevices() {
+  try {
+    fs.mkdirSync(path.dirname(DEVICES_FILE), { recursive: true });
+    const tmp = DEVICES_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(devices)));
+    fs.renameSync(tmp, DEVICES_FILE); // escritura atómica
+  } catch (e) { console.error('save devices', e.message); }
+}
+loadDevices();
 
 const clients = [
   { client_id: 'zitadel', client_secret: process.env.CLIENT_SECRET_ZITADEL || 'zitadel-tripleenable-idp-secret',
@@ -71,7 +99,7 @@ const provider = new Provider(ISSUER, {
     if (!u && devices.has(id)) {
       const nm = devices.get(id).name || id; const parts = nm.trim().split(/\s+/);
       u = { name: nm, given_name: parts[0] || id, family_name: parts.slice(1).join(' ') || 'Wallet',
-            email: id + '@idp.tripleenable.com', preferred_username: id };
+            email: emailFor(id), preferred_username: id };
     }
     if (!u) return undefined;
     return { accountId: id, async claims() { return { sub: id, email_verified: true, ...u }; } };
@@ -196,6 +224,7 @@ async function handle(req, res) {
     const { username, jwk: pub, name } = JSON.parse(await readBody(req) || '{}');
     if (!username || !pub || pub.kty !== 'OKP') return json(res, 400, { error: 'username + jwk OKP requeridos' });
     devices.set(username, { jwk: pub, name: name || username });
+    saveDevices(); // persistir el enrolamiento
     console.log('device registrado:', username);
     return json(res, 200, { ok: true, username });
   }
