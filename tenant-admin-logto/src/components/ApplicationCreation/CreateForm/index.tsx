@@ -1,0 +1,346 @@
+// @ts-nocheck — vendored from logto-io/logto packages/console (typechecked upstream)
+/* eslint-disable max-lines */
+import { type AdminConsoleKey } from '@logto/phrases';
+import type { Application } from '@logto/schemas';
+import { ApplicationType } from '@logto/schemas';
+import { type ReactElement, useContext, useEffect, useMemo } from 'react';
+import { FormProvider, useController, useForm } from 'react-hook-form';
+import { toast } from 'react-hot-toast';
+import { Trans, useTranslation } from 'react-i18next';
+import Modal from 'react-modal';
+import useSWR, { useSWRConfig } from 'swr';
+
+import { GtagConversionId, reportToGoogle } from '@/components/Conversion/utils';
+import LearnMore from '@/components/LearnMore';
+import SamlAppLimitBanner from '@/components/SamlAppLimitBanner';
+import { defaultPageSize, integrateLogto, thirdPartyApp } from '@/consts';
+import { ossSamlApplicationsLimit } from '@/consts/application-limits';
+import { isCloud } from '@/consts/env';
+import { latestProPlanId } from '@/consts/subscriptions';
+import { SubscriptionDataContext } from '@/contexts/SubscriptionDataProvider';
+import { TenantsContext } from '@/contexts/TenantsProvider';
+import DynamicT from '@/ds-components/DynamicT';
+import FormField from '@/ds-components/FormField';
+import ModalLayout from '@/ds-components/ModalLayout';
+import RadioGroup, { Radio } from '@/ds-components/RadioGroup';
+import TextInput from '@/ds-components/TextInput';
+import TextLink from '@/ds-components/TextLink';
+import { type RequestError } from '@/hooks/use-api';
+import useApi from '@/hooks/use-api';
+import useApplicationsUsage from '@/hooks/use-applications-usage';
+import useDocumentationUrl from '@/hooks/use-documentation-url';
+import TypeDescription from '@/features/Applications/components/TypeDescription';
+import modalStyles from '@/scss/modal.module.scss';
+import { applicationTypeI18nKey } from '@/types/applications';
+import { trySubmitSafe } from '@/utils/form';
+import { isPaidPlan } from '@/utils/subscription';
+import { buildUrl } from '@/utils/url';
+
+import AuthorizationFlowSelector from './AuthorizationFlowSelector';
+import Footer from './Footer';
+import styles from './index.module.scss';
+import { AuthorizationFlow, type CreateApplicationFormData } from './types';
+
+const applicationsEndpoint = 'api/applications';
+type AvailableApplicationTypeForCreation = Extract<
+  ApplicationType,
+  | ApplicationType.Native
+  | ApplicationType.SPA
+  | ApplicationType.Traditional
+  | ApplicationType.MachineToMachine
+>;
+
+type FormData = CreateApplicationFormData;
+
+export type Props = {
+  readonly isDefaultCreateThirdParty?: boolean;
+  readonly defaultCreateType?: ApplicationType;
+  readonly defaultCreateFrameworkName?: string;
+  readonly isDefaultCreateDeviceFlow?: boolean;
+  readonly onClose?: (createdApp?: Application) => void;
+};
+
+function CreateForm({
+  defaultCreateType,
+  defaultCreateFrameworkName,
+  isDefaultCreateThirdParty,
+  isDefaultCreateDeviceFlow,
+  onClose,
+}: Props) {
+  const formMethods = useForm<FormData>({
+    defaultValues: {
+      type: defaultCreateType,
+      isThirdParty: isDefaultCreateThirdParty,
+      ...(isDefaultCreateDeviceFlow && { authorizationFlow: AuthorizationFlow.DeviceFlow }),
+    },
+  });
+  const {
+    handleSubmit,
+    watch,
+    control,
+    register,
+    formState: { errors, isSubmitting },
+  } = formMethods;
+
+  const { data } = useSWR<[Application[], number], RequestError>(
+    !isCloud &&
+      defaultCreateType === ApplicationType.SAML &&
+      buildUrl(applicationsEndpoint, [
+        ['page', String(1)],
+        ['page_size', String(defaultPageSize)],
+        ['isThirdParty', 'false'],
+        ['types', ApplicationType.SAML],
+      ])
+  );
+
+  const [_, samlAppTotalCount] = data ?? [];
+  const {
+    currentSubscription: { planId, isEnterprisePlan },
+  } = useContext(SubscriptionDataContext);
+  const { currentTenant } = useContext(TenantsContext);
+  const { mutate: mutateGlobal } = useSWRConfig();
+  const isPaidTenant = isPaidPlan(planId, isEnterprisePlan);
+  const {
+    field: { onChange, value, name, ref },
+  } = useController({ name: 'type', control, rules: { required: true } });
+  const { t } = useTranslation(undefined, { keyPrefix: 'admin_console' });
+  const api = useApi();
+  const {
+    hasMachineToMachineAppsReachedLimit,
+    hasSamlAppsReachedLimit,
+    hasThirdPartyAppsReachedLimit,
+  } = useApplicationsUsage();
+  const { getDocumentationUrl } = useDocumentationUrl();
+  const applicationType = watch('type');
+  const isThirdPartyApp = watch('isThirdParty');
+
+  // Reset authorizationFlow when switching away from Native app type
+  useEffect(() => {
+    if (applicationType !== ApplicationType.Native) {
+      formMethods.setValue('authorizationFlow', undefined);
+    }
+  }, [applicationType, formMethods]);
+
+  const paywall = useMemo(() => {
+    if (isPaidTenant) {
+      return;
+    }
+    if (
+      applicationType === ApplicationType.MachineToMachine ||
+      applicationType === ApplicationType.SAML ||
+      isThirdPartyApp
+    ) {
+      return latestProPlanId;
+    }
+  }, [applicationType, isPaidTenant, isThirdPartyApp]);
+
+  const hasAddOnTag = useMemo(() => {
+    if (!isPaidTenant) {
+      return false;
+    }
+    if (applicationType === ApplicationType.MachineToMachine) {
+      return hasMachineToMachineAppsReachedLimit;
+    }
+    if (applicationType === ApplicationType.SAML) {
+      return hasSamlAppsReachedLimit;
+    }
+    if (isThirdPartyApp) {
+      return hasThirdPartyAppsReachedLimit;
+    }
+    return false;
+  }, [
+    applicationType,
+    hasMachineToMachineAppsReachedLimit,
+    hasSamlAppsReachedLimit,
+    hasThirdPartyAppsReachedLimit,
+    isPaidTenant,
+    isThirdPartyApp,
+  ]);
+
+  const onSubmit = handleSubmit(
+    trySubmitSafe(async ({ authorizationFlow, ...data }) => {
+      if (isSubmitting) {
+        return;
+      }
+
+      const appCreationEndpoint =
+        data.type === ApplicationType.SAML ? 'api/saml-applications' : 'api/applications';
+
+      const createdApp = await api
+        .post(appCreationEndpoint, {
+          json: {
+            ...data,
+            ...(authorizationFlow === AuthorizationFlow.DeviceFlow && {
+              customClientMetadata: { isDeviceFlow: true },
+            }),
+          },
+        })
+        .json<Application>();
+
+      // Report the conversion event after the application is created. Note that the conversion
+      // should be set as count once since this will be reported multiple times.
+      reportToGoogle(GtagConversionId.CreateFirstApp, { transactionId: currentTenant?.id });
+
+      toast.success(t('applications.application_created'));
+      // Trigger a refetch of the applications list
+      void mutateGlobal((key) => typeof key === 'string' && key.startsWith('api/applications'));
+      onClose?.(createdApp);
+    })
+  );
+
+  const subtitleElement = useMemo<AdminConsoleKey | ReactElement>(() => {
+    if (!defaultCreateFrameworkName) {
+      return (
+        <>
+          <DynamicT forKey="applications.subtitle" />
+          <LearnMore isRelativeDocUrl href={integrateLogto} />
+        </>
+      );
+    }
+
+    if (isDefaultCreateThirdParty) {
+      return (
+        <Trans
+          components={{
+            a: <TextLink href={getDocumentationUrl(thirdPartyApp)} targetBlank="noopener" />,
+          }}
+        >
+          {t('applications.third_party_application_placeholder_description')}
+        </Trans>
+      );
+    }
+
+    if (isDefaultCreateDeviceFlow) {
+      return <DynamicT forKey="applications.create_device_flow_description" />;
+    }
+
+    return (
+      <DynamicT
+        forKey="applications.subtitle_with_app_type"
+        interpolation={{ name: defaultCreateFrameworkName }}
+      />
+    );
+  }, [
+    defaultCreateFrameworkName,
+    isDefaultCreateDeviceFlow,
+    getDocumentationUrl,
+    isDefaultCreateThirdParty,
+    t,
+  ]);
+
+  return (
+    <Modal
+      shouldCloseOnEsc
+      isOpen
+      className={modalStyles.content}
+      overlayClassName={modalStyles.overlay}
+      onRequestClose={() => {
+        onClose?.();
+      }}
+    >
+      <ModalLayout
+        title={
+          isDefaultCreateThirdParty ? (
+            <DynamicT
+              forKey="applications.create_thrid_party_modal_title"
+              interpolation={{
+                type: t(`${applicationTypeI18nKey[applicationType]}.title`),
+              }}
+            />
+          ) : (
+            <DynamicT forKey="applications.create" />
+          )
+        }
+        subtitle={subtitleElement}
+        paywall={paywall}
+        hasAddOnTag={hasAddOnTag}
+        size={defaultCreateType ? 'medium' : 'large'}
+        footer={
+          !isCloud &&
+          defaultCreateType === ApplicationType.SAML &&
+          typeof samlAppTotalCount === 'number' &&
+          samlAppTotalCount >= ossSamlApplicationsLimit ? (
+            <SamlAppLimitBanner variant="footer" limit={ossSamlApplicationsLimit} />
+          ) : (
+            <Footer
+              selectedType={value}
+              isLoading={isSubmitting}
+              isThirdParty={isDefaultCreateThirdParty}
+              onClickCreate={onSubmit}
+            />
+          )
+        }
+        onClose={onClose}
+      >
+        <FormProvider {...formMethods}>
+          <form>
+            {!defaultCreateType && (
+              <FormField title="applications.select_application_type">
+                <RadioGroup
+                  ref={ref}
+                  className={styles.radioGroup}
+                  name={name}
+                  value={value}
+                  type="card"
+                  onChange={onChange}
+                >
+                  {Object.values(ApplicationType)
+                    .filter((value): value is AvailableApplicationTypeForCreation =>
+                      [
+                        ApplicationType.Native,
+                        ApplicationType.SPA,
+                        ApplicationType.Traditional,
+                        ApplicationType.MachineToMachine,
+                      ].includes(value)
+                    )
+                    .map((type) => (
+                      <Radio
+                        key={type}
+                        value={type}
+                        hasCheckIconForCard={type !== ApplicationType.MachineToMachine}
+                      >
+                        <TypeDescription
+                          type={type}
+                          title={t(`${applicationTypeI18nKey[type]}.title`)}
+                          subtitle={t(`${applicationTypeI18nKey[type]}.subtitle`)}
+                          description={t(`${applicationTypeI18nKey[type]}.description`)}
+                        />
+                      </Radio>
+                    ))}
+                </RadioGroup>
+                {errors.type?.type === 'required' && (
+                  <div className={styles.error}>
+                    {t('applications.no_application_type_selected')}
+                  </div>
+                )}
+              </FormField>
+            )}
+            <FormField isRequired title="applications.application_name">
+              <TextInput
+                {...register('name', { required: true })}
+                // eslint-disable-next-line jsx-a11y/no-autofocus
+                autoFocus={!!defaultCreateType}
+                placeholder={t('applications.application_name_placeholder')}
+                error={Boolean(errors.name)}
+              />
+            </FormField>
+            <FormField title="applications.application_description">
+              <TextInput
+                {...register('description')}
+                placeholder={t('applications.application_description_placeholder')}
+              />
+            </FormField>
+            {applicationType === ApplicationType.Native &&
+              (!defaultCreateFrameworkName || isDefaultCreateThirdParty) && (
+                <AuthorizationFlowSelector />
+              )}
+            {defaultCreateType && <input hidden {...register('type')} value={defaultCreateType} />}
+          </form>
+        </FormProvider>
+      </ModalLayout>
+    </Modal>
+  );
+}
+
+export default CreateForm;
+/* eslint-enable max-lines */

@@ -1,0 +1,43 @@
+@use 'scss/underscore' as _;
+@use 'scss/dimensions' as dim;
+
+.step {
+  display: flex;
+  align-items: center;
+  padding: _.unit(5) _.unit(6);
+  border-radius: 16px;
+  background-color: var(--color-layer-1);
+  max-width: dim.$guide-main-content-max-width;
+  margin: 0 auto;
+  gap: _.unit(4);
+
+  .index {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    @include _.shimmering-animation;
+  }
+
+  .wrapper {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+
+    .title {
+      width: 140px;
+      height: 24px;
+      @include _.shimmering-animation;
+    }
+
+    .subtitle {
+      width: 400px;
+      height: 20px;
+      margin-top: _.unit(1);
+      @include _.shimmering-animation;
+    }
+  }
+}
+
+.step + .step {
+  margin-top: _.unit(6);
+}

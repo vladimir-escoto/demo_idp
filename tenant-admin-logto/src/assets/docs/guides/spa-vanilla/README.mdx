@@ -1,0 +1,164 @@
+import UriInputField from '@/mdx-components/UriInputField';
+import Tabs from '@/mdx-components/Tabs';
+import TabItem from '@/mdx-components/TabItem';
+import InlineNotification from '@/ds-components/InlineNotification';
+import Steps from '@/mdx-components/Steps';
+import Step from '@/mdx-components/Step';
+import CustomDomainEndpointNotice from '@/mdx-components/CustomDomainEndpointNotice';
+
+import Checkpoint from '../../fragments/_checkpoint.md';
+import RedirectUrisWeb, { defaultRedirectUri, defaultPostSignOutUri } from '../../fragments/_redirect-uris-web.mdx';
+
+<Steps>
+
+<Step
+  title="Installation"
+  subtitle="Install Logto SDK for your project"
+>
+<Tabs>
+<TabItem value="npm" label="npm">
+
+```bash
+npm i @logto/browser
+```
+
+</TabItem>
+<TabItem value="pnpm" label="pnpm">
+
+```bash
+pnpm add @logto/browser
+```
+
+</TabItem>
+<TabItem value="yarn" label="yarn">
+
+```bash
+yarn add @logto/browser
+```
+
+</TabItem>
+<TabItem value="cdn" label="CDN">
+
+```html
+<script type="module">
+  import LogtoClient from 'https://cdn.jsdelivr.net/npm/@logto/browser@latest/+esm';
+</script>
+```
+</TabItem>
+</Tabs>
+</Step>
+
+<Step title="Init LogtoClient">
+
+Import and init `LogtoClient` with configs:
+
+<Code className="language-ts" title="index.js">
+    {`import LogtoClient from '@logto/browser';
+
+const logtoClient = new LogtoClient({
+  endpoint: '${props.endpoint}',
+  appId: '${props.app.id}',
+});`}
+</Code>
+
+<br/>
+
+<CustomDomainEndpointNotice />
+
+</Step>
+
+<Step title="Configure redirect URIs">
+
+<RedirectUrisWeb />
+
+</Step>
+
+<Step title="Handle redirect">
+
+There are still things to do after the user is redirected back to your application from Logto. Let's handle it properly.
+
+```ts title="pages/Callback.js"
+const callbackHandler = async (logtoClient) => {
+  await logtoClient.handleSignInCallback(window.location.href);
+
+  if (!logtoClient.isAuthenticated) {
+    // Handle failed sign-in
+    alert('Failed to sign in');
+    return;
+  }
+
+  // Handle successful sign-in
+  window.location.assign('/');
+};
+```
+
+</Step>
+
+<Step title="Implement sign-in and sign-out">
+
+`logtoClient` provides `signIn` and `signOut` methods to help you easily manage the authentication flow.
+
+<Code className="language-js" title="pages/Home.js">
+    {`const isAuthenticated = await logtoClient.isAuthenticated();
+
+const onClickSignIn = () => {
+  logtoClient.signIn('${props.redirectUris[0] ?? defaultRedirectUri}');
+};
+const onClickSignOut = () => {
+  logtoClient.signOut('${props.postLogoutRedirectUris[0] ?? defaultPostSignOutUri}');
+};
+
+const button = document.createElement('button');
+button.innerHTML = isAuthenticated ? 'Sign Out' : 'Sign In';
+button.addEventListener('click', isAuthenticated ? onClickSignOut : onClickSignIn);
+
+document.body.appendChild(button);`}
+</Code>
+
+Calling `.signOut()` will clear all the Logto data in memory and `localStorage` if they exist.
+
+</Step>
+
+<Step title="Checkpoint: Test your application">
+
+<Checkpoint />
+
+</Step>
+
+<Step title="Display user information">
+
+To display the user's information, you can use the `logtoClient.getIdTokenClaims()` method. For example, in your Home page:
+
+```js title="pages/Home.js"
+const userInfo = await logtoClient.getIdTokenClaims();
+
+// Generate display table for ID token claims
+const table = document.createElement('table');
+const thead = document.createElement('thead');
+const tr = document.createElement('tr');
+const thName = document.createElement('th');
+const thValue = document.createElement('th');
+thName.innerHTML = 'Name';
+thValue.innerHTML = 'Value';
+tr.append(thName, thValue);
+thead.append(tr);
+table.append(thead);
+
+const tbody = document.createElement('tbody');
+
+for (const [key, value] of Object.entries(userInfo)) {
+  const tr = document.createElement('tr');
+  const tdName = document.createElement('td');
+  const tdValue = document.createElement('td');
+  tdName.innerHTML = key;
+  tdValue.innerHTML = typeof value === 'string' ? value : JSON.stringify(value);
+  tr.append(tdName, tdValue);
+  tbody.append(tr);
+}
+
+table.append(tbody);
+```
+
+</Step>
+
+</Steps>

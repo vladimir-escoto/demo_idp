@@ -1,0 +1,166 @@
+import UriInputField from '@/mdx-components/UriInputField';
+import InlineNotification from '@/ds-components/InlineNotification';
+import Steps from '@/mdx-components/Steps';
+import Step from '@/mdx-components/Step';
+import NpmLikeInstallation from '@/mdx-components/NpmLikeInstallation';
+import CustomDomainEndpointNotice from '@/mdx-components/CustomDomainEndpointNotice';
+
+import Checkpoint from '../../fragments/_checkpoint.md';
+import RedirectUrisWeb from '../../fragments/_redirect-uris-web.mdx';
+import { defaultRedirectUri, defaultPostSignOutUri } from '../../fragments/_redirect-uris-web.mdx';
+
+<Steps>
+
+<Step
+  title="Installation"
+  subtitle="Install Logto SDK for your project"
+>
+
+<NpmLikeInstallation packageName="@logto/vue" />
+
+</Step>
+
+<Step
+  title="Init LogtoClient"
+>
+
+<InlineNotification>
+  Logto Vue SDK is built with Vue 3 composition API. Therefore, only Vue 3 is supported at the moment. Contact us if you want to add support for Vue 2.
+</InlineNotification>
+
+Import and use `createLogto` to install Logto plugin:
+
+<Code className="language-ts" title="main.ts">
+    {`import { createLogto, type LogtoConfig } from '@logto/vue';
+import { createApp } from 'vue';
+import App from './App.vue';
+
+const config: LogtoConfig = {
+  endpoint: '${props.endpoint}',
+  appId: '${props.app.id}',
+};
+
+const app = createApp(App);
+
+app.use(createLogto, config);
+app.mount("#app");`}
+</Code>
+
+<br/>
+
+<CustomDomainEndpointNotice />
+
+</Step>
+
+<Step title="Configure redirect URIs">
+
+<RedirectUrisWeb />
+
+</Step>
+
+<Step title="Handle redirect">
+
+There are still things to do after the user is redirected back to your application from Logto. Let's handle it properly.
+
+First let's create a callback page:
+
+```ts title="views/CallbackView.vue"
+import { useHandleSignInCallback } from '@logto/vue';
+import router from '@/router';
+
+const { isLoading } = useHandleSignInCallback(() => {
+  // Do something when finished, e.g. redirect to home page
+});
+```
+
+```html
+<template>
+  <!-- When it's working in progress -->
+  <p v-if="isLoading">Redirecting...</p>
+</template>
+```
+
+Insert the code below in your `/callback` route which does NOT require authentication:
+
+```ts title="router/index.ts"
+// Assuming vue-router
+const router = createRouter({
+  routes: [
+    {
+      path: '/callback',
+      name: 'callback',
+      component: CallbackView,
+    },
+  ],
+});
+```
+
+</Step>
+
+<Step title="Implement sign-in and sign-out">
+
+We provide a composable `useLogto()` which can help you easily manage the authentication flow.
+
+<Code className="language-ts" title="views/HomeView.vue">
+    {`import { useLogto } from '@logto/vue';
+
+const { signIn, signOut, isAuthenticated } = useLogto();
+
+const onClickSignIn = () => signIn('${props.redirectUris[0] || defaultRedirectUri}');
+const onClickSignOut = () => signOut('${props.postLogoutRedirectUris[0] || defaultPostSignOutUri}');
+`}
+</Code>
+
+Calling `.signOut()` will clear all the Logto data in memory and localStorage if they exist.
+
+</Step>
+
+<Step title="Checkpoint: Test your application">
+
+<Checkpoint />
+
+</Step>
+
+<Step title="Display user information">
+
+To display the user's information, you can use the `getIdTokenClaims()` method. For example, in your Home page:
+
+```ts title="views/HomeView.vue"
+import { useLogto, type IdTokenClaims } from '@logto/vue';
+import { ref } from 'vue';
+
+const { isAuthenticated, getIdTokenClaims } = useLogto();
+const user = ref<IdTokenClaims>();
+
+if (isAuthenticated.value) {
+  (async () => {
+    const claims = await getIdTokenClaims();
+    user.value = claims;
+  })();
+}
+```
+
+```html
+<template>
+  <div v-if="isAuthenticated && user">
+    <table class="table">
+      <thead>
+        <tr>
+          <th>Name</th>
+          <th>Value</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr v-for="(value, key) in user" v-bind:key="key">
+          <td>{{ key }}</td>
+          <td>{{ typeof value === "string" ? value : JSON.stringify(value) }}</td>
+        </tr>
+      </tbody>
+    </table>
+  </div>
+</template>
+```
+
+</Step>
+
+</Steps>

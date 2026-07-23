@@ -1,0 +1,71 @@
+@use 'scss/underscore' as _;
+
+$offset: 100%;
+
+.content {
+  position: absolute;
+  top: 0;
+  inset-inline-end: 0;
+  bottom: 0;
+  width: 50%;
+  max-width: 960px;
+  min-width: 860px;
+  outline: none;
+  background: var(--color-base);
+  transition: transform 0.3s ease-in-out;
+
+  .wrapper {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+
+    .header {
+      display: flex;
+      align-items: center;
+      flex-shrink: 0;
+      background-color: var(--color-layer-1);
+      height: 64px;
+      padding: 0 _.unit(6);
+    }
+
+    .body {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      overflow-y: auto;
+    }
+  }
+}
+
+.overlay {
+  position: fixed;
+  background: var(--color-drawer-overlay);
+  inset: 0;
+}
+
+/* Next.js CSS Modules require a local class in every selector, so the
+   ReactModal state classes are anchored on the local .content class (both
+   classes live on the same element). */
+.content:global(.ReactModal__Content)[role='drawer'] {
+  transform: translateX(100%);
+}
+
+.content:global(.ReactModal__Content)[role='drawer'][data-dir='rtl'] {
+  transform: translateX(-100%);
+}
+
+.content:global(.ReactModal__Content--after-open)[role='drawer'] {
+  transform: translateX(0);
+}
+
+.content:global(.ReactModal__Content--after-open)[role='drawer'][data-dir='rtl'] {
+  transform: translateX(0);
+}
+
+.content:global(.ReactModal__Content--before-close)[role='drawer'] {
+  transform: translateX(100%);
+}
+
+.content:global(.ReactModal__Content--before-close)[role='drawer'][data-dir='rtl'] {
+  transform: translateX(-100%);
+}

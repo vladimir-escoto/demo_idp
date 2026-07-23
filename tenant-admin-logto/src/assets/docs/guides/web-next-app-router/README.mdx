@@ -1,0 +1,183 @@
+import { generateStandardSecret } from '@logto/shared/universal';
+import NpmLikeInstallation from '@/mdx-components/NpmLikeInstallation';
+import Steps from '@/mdx-components/Steps';
+import Step from '@/mdx-components/Step';
+import CustomDomainEndpointNotice from '@/mdx-components/CustomDomainEndpointNotice';
+import Checkpoint from '../../fragments/_checkpoint.md';
+import RedirectUrisWeb from '../../fragments/_redirect-uris-web.mdx';
+
+<Steps>
+
+<Step
+  title="Installation"
+  subtitle="Install Logto SDK"
+>
+
+<NpmLikeInstallation packageName="@logto/next" />
+
+</Step>
+
+<Step
+  title="Prepare configs"
+>
+
+Prepare configuration for the Logto client:
+
+<Code title="app/logto.ts" className="language-ts">
+    {`export const logtoConfig = {
+  endpoint: '${props.endpoint}',
+  appId: '${props.app.id}',
+  appSecret: '${props.secrets[0]?.value ?? props.app.secret}',
+  baseUrl: 'http://localhost:3000', // Change to your own base URL
+  cookieSecret: '${generateStandardSecret()}', // Auto-generated 32 digit secret
+  cookieSecure: process.env.NODE_ENV === 'production',
+};
+`}
+</Code>
+
+<br/>
+
+<CustomDomainEndpointNotice />
+
+</Step>
+
+<Step 
+  title="Configure redirect URIs"
+  subtitle="2 URIs"
+>
+
+<RedirectUrisWeb />
+
+</Step>
+
+<Step
+  title="Handle the callback"
+>
+
+Add a callback route to your app:
+
+```tsx title="app/callback/route.ts"
+import { handleSignIn } from '@logto/next/server-actions';
+import { redirect } from 'next/navigation';
+import { NextRequest } from 'next/server';
+import { logtoConfig } from '../logto';
+
+export async function GET(request: NextRequest) {
+  const searchParams = request.nextUrl.searchParams;
+  await handleSignIn(logtoConfig, searchParams);
+
+  redirect('/');
+}
+```
+
+</Step>
+
+<Step
+  title="Implement sign-in and sign-out"
+>
+
+### Implement sign-in and sign-out button
+
+In Next.js App Router, events are handled in client components, so we need to create two components first: `SignIn` and `SignOut`.
+
+```tsx title="app/sign-in.tsx"
+'use client';
+
+type Props = {
+  onSignIn: () => Promise<void>;
+};
+
+const SignIn = ({ onSignIn }: Props) => {
+  return (
+    <button
+      onClick={() => {
+        onSignIn();
+      }}
+    >
+      Sign In
+    </button>
+  );
+};
+
+export default SignIn;
+```
+
+```tsx title="app/sign-out.tsx"
+'use client';
+
+type Props = {
+  onSignOut: () => Promise<void>;
+};
+
+const SignOut = ({ onSignOut }: Props) => {
+  return (
+    <button
+      onClick={() => {
+        onSignOut();
+      }}
+    >
+      Sign Out
+    </button>
+  );
+};
+
+export default SignOut;
+```
+
+Remember to add `'use client'` to the top of the file to indicate that these components are client components.
+
+### Add buttons to home page
+
+Now let's add the sign-in and sign-out buttons in your hoem page. We need to call the server actions in SDK when needed. To help with this, use `getLogtoContext` to fetch authentication status.
+
+```tsx title="app/page.tsx"
+import { getLogtoContext, signIn, signOut } from '@logto/next/server-actions';
+import SignIn from './sign-in';
+import SignOut from './sign-out';
+import { logtoConfig } from './logto';
+
+const Home = () => {
+  const { isAuthenticated, claims } = await getLogtoContext(logtoConfig);
+
+  return (
+    <nav>
+      {isAuthenticated ? (
+        <p>
+          Hello, {claims?.sub},
+          <SignOut
+            onSignOut={async () => {
+              'use server';
+
+              await signOut(logtoConfig);
+            }}
+          />
+        </p>
+      ) : (
+        <p>
+          <SignIn
+            onSignIn={async () => {
+              'use server';
+
+              await signIn(logtoConfig);
+            }}
+          />
+        </p>
+      )}
+    </nav>
+  );
+};
+
+export default Home;
+```
+
+</Step>
+
+<Step
+  title="Checkpoint: Test your application"
+>
+
+<Checkpoint />
+
+</Step>
+
+</Steps>

@@ -258,6 +258,11 @@ const handle = async (request: NextRequest, { params }: { params: { path: string
     return forward('api/sign-in-exp');
   }
 
+  // Public OIDC discovery document (used by the endpoints card / guides)
+  if (method === 'GET' && path === 'oidc/.well-known/openid-configuration') {
+    return forward('oidc/.well-known/openid-configuration');
+  }
+
   // Organization-scoped paths: api/organizations/{id}/...
   if (segments[0] === 'api' && segments[1] === 'organizations') {
     const requestedOrg = segments[2];

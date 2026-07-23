@@ -1,0 +1,111 @@
+import UriInputField from '@/mdx-components/UriInputField';
+import InlineNotification from '@/ds-components/InlineNotification';
+import { generateStandardSecret } from '@logto/shared/universal';
+import Steps from '@/mdx-components/Steps';
+import Step from '@/mdx-components/Step';
+import NpmLikeInstallation from '@/mdx-components/NpmLikeInstallation';
+import CustomDomainEndpointNotice from '@/mdx-components/CustomDomainEndpointNotice';
+
+import Checkpoint from '../../fragments/_checkpoint.md';
+import RedirectUris from '../../fragments/_redirect-uris-web.mdx';
+
+<Steps>
+
+<Step
+  title="Installation"
+  subtitle="Install Logto SDK and required dependencies"
+>
+
+<NpmLikeInstallation packageName="@logto/express cookie-parser express-session" />
+
+</Step>
+
+<Step
+  title="Prepare configs and required middlewares"
+>
+
+Prepare configuration for the Logto client:
+
+<Code title="app.ts" className="language-ts">
+    {`import type { LogtoExpressConfig } from '@logto/express';
+
+const config: LogtoExpressConfig = {
+  endpoint: '${props.endpoint}',
+  appId: '${props.app.id}',
+  appSecret: '${props.secrets[0]?.value ?? props.app.secret}',
+  baseUrl: 'http://localhost:3000', // Change to your own base URL
+};
+`}
+</Code>
+
+<br/>
+
+<CustomDomainEndpointNotice />
+
+The SDK requires [express-session](https://www.npmjs.com/package/express-session) to be configured in prior.
+
+<Code className="language-ts" title="app.ts">
+    {`import cookieParser from 'cookie-parser';
+import session from 'express-session';
+
+app.use(cookieParser());
+app.use(session({ secret: '${generateStandardSecret()}', cookie: { maxAge: 14 * 24 * 60 * 60 } }));`}
+</Code>
+
+</Step>
+
+<Step title="Register auth routes">
+
+The SDK provides a helper function `handleAuthRoutes` to register 3 routes:
+
+1. `/logto/sign-in`: Sign in with Logto.
+2. `/logto/sign-in-callback`: Handle sign-in callback.
+3. `/logto/sign-out`: Sign out with Logto.
+
+Add the following code to your app:
+
+```ts title="app.ts"
+import { handleAuthRoutes } from '@logto/express';
+
+app.use(handleAuthRoutes(config));
+```
+
+</Step>
+
+<Step 
+  title="Configure redirect URIs"
+  subtitle="2 URIs"
+>
+
+<RedirectUris callbackUri="http://localhost:3000/logto/sign-in-callback" />
+
+</Step>
+
+<Step title="Implement sign-in and sign-out">
+
+With the routes registered, now let's implement the sign-in and sign-out buttons in the home page. We need to redirect the user to the sign-in or sign-out route when needed. To help with this, use `withLogto` to inject authentication status to `req.user`.
+
+```ts title="app.ts"
+import { withLogto } from '@logto/express';
+
+app.get('/', withLogto(config), (req, res) => {
+  res.setHeader('content-type', 'text/html');
+
+  if (req.user.isAuthenticated) {
+    res.end(`<div>Hello ${req.user.claims?.sub}, <a href="/logto/sign-out">Sign Out</a></div>`);
+  } else {
+    res.end('<div><a href="/logto/sign-in">Sign In</a></div>');
+  }
+});
+```
+</Step>
+
+<Step
+  title="Checkpoint: Test your application"
+>
+
+<Checkpoint />
+
+</Step>
+
+</Steps>

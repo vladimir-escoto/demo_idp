@@ -1,0 +1,5 @@
+@use 'scss/underscore' as _;
+
+.headlineWithMultiInputs {
+  padding-inline-end: _.unit(9);
+}
