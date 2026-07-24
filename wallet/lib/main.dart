@@ -332,11 +332,24 @@ class _HomeState extends State<Home> {
         final msg = MqttPublishPayload.bytesToStringAsString(rec.payload.message);
         try {
           final data = jsonDecode(msg) as Map<String, dynamic>;
-          if (data['v'] == 'te1') {
+          if (data['v'] == 'te1' || data['v'] == 'te2') {
             // Reto de los factores QR/Push: el topic identifica al dispositivo.
             final owner = _byDevice(data['deviceId']?.toString());
             if (owner == null) return;
             data['_forUser'] = owner.username;
+
+            if (data['v'] == 'te2') {
+              // Traemos el transcript para poder enseñar QUÉ se firma y las opciones.
+              final idp = (data['idp'] ?? Cfg.idpUrl).toString();
+              _transcript(idp, '${data['challengeId']}').then((t) {
+                if (t == null || !mounted) return;
+                setState(() {
+                  data['signingString'] = t['signingString'];
+                  data['transcript'] = t['transcript'];
+                  data['choices'] = t['choices'];
+                });
+              });
+            }
           } else {
             data['_forUser'] = forUser;
           }
@@ -355,6 +368,27 @@ class _HomeState extends State<Home> {
     return null;
   }
 
+  Widget _kv(String k, String v) => Padding(
+        padding: const EdgeInsets.symmetric(vertical: 2),
+        child: Row(mainAxisAlignment: MainAxisAlignment.spaceBetween, children: [
+          Text(k, style: TextStyle(color: Colors.grey.shade400, fontSize: 12)),
+          const SizedBox(width: 12),
+          Expanded(child: Text(v, textAlign: TextAlign.right, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12))),
+        ]),
+      );
+
+  /// Con te2 el push es solo un timbre: el material a firmar (y las opciones del
+  /// number matching) se recogen por TLS contra el IdP, no por el broker público.
+  Future<Map<String, dynamic>?> _transcript(String idp, String challengeId) async {
+    try {
+      final r = await http.get(Uri.parse('$idp/te/challenge/$challengeId/transcript'));
+      if (r.statusCode != 200) return null;
+      return jsonDecode(r.body) as Map<String, dynamic>;
+    } catch (_) {
+      return null;
+    }
+  }
+
   Identity? _byDevice(String? d) {
     if (d == null) return null;
     for (final id in _ids) {
@@ -367,7 +401,7 @@ class _HomeState extends State<Home> {
   Future<void> _respond(Map<String, dynamic> req, Identity id, bool approve, {int? choice}) async {
     final idp = (req['idp'] ?? Cfg.idpUrl).toString();
 
-    if (req['v'] == 'te1') {
+    if (req['v'] == 'te1' || req['v'] == 'te2') {
       // Factores QR/Push: el IdP verifica la firma y acuña el one-time token con
       // el que la UI de Logto crea la sesión.
       if (id.deviceId == null) {
@@ -380,7 +414,21 @@ class _HomeState extends State<Home> {
       }
       final body = <String, dynamic>{'deviceId': id.deviceId};
       if (approve) {
-        body['signature'] = await id.sign(req['nonce'].toString());
+        // te2 firma el transcript completo (emisor, dominio, aplicación, caducidad),
+        // así la firma queda atada al contexto y no sirve en ningún otro sitio.
+        // te1 firmaba el nonce pelado.
+        final signing = req['v'] == 'te2'
+            ? (req['signingString'] ?? (await _transcript(idp, '${req['challengeId']}'))?['signingString'])
+            : req['nonce'];
+        if (signing == null) {
+          if (mounted) {
+            ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+                content: Text('No pudimos obtener el reto que hay que firmar'),
+                backgroundColor: Color(0xFF334155)));
+          }
+          return;
+        }
+        body['signature'] = await id.sign(signing.toString());
         if (choice != null) body['choice'] = choice;
       } else {
         body['decision'] = 'deny';
@@ -545,8 +593,24 @@ class _HomeState extends State<Home> {
                 padding: const EdgeInsets.all(16),
                 decoration: BoxDecoration(color: card, borderRadius: BorderRadius.circular(14), border: Border.all(color: line)),
                 child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
-                  Text('${r['client'] ?? 'Una app'} quiere iniciar tu sesión', style: const TextStyle(fontWeight: FontWeight.w700)),
+                  Text('${(r['transcript']?['client'] ?? r['client']) ?? 'Una app'} quiere iniciar tu sesión', style: const TextStyle(fontWeight: FontWeight.w700)),
                   Text('como ${r['_forUser']}', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+                  // te2: enseñamos QUÉ se va a firmar antes de firmarlo. Sin esto el
+                  // usuario aprueba a ciegas y solo le queda comparar un número.
+                  if (r['transcript'] != null) ...[
+                    const SizedBox(height: 10),
+                    Container(
+                      padding: const EdgeInsets.all(10),
+                      decoration: BoxDecoration(color: bg, borderRadius: BorderRadius.circular(10), border: Border.all(color: line)),
+                      child: Column(crossAxisAlignment: CrossAxisAlignment.start, children: [
+                        Text('VAS A FIRMAR', style: TextStyle(color: Colors.grey.shade500, fontSize: 10, letterSpacing: 1.1, fontWeight: FontWeight.w700)),
+                        const SizedBox(height: 6),
+                        _kv('Dominio', '${r['transcript']['rp']}'),
+                        _kv('Emisor', '${r['transcript']['iss']}'),
+                        _kv('Reto', '${r['transcript']['challengeId']}'),
+                      ]),
+                    ),
+                  ],
                   const SizedBox(height: 10),
                   if (id == null)
                     Text('No tienes esa identidad en este dispositivo.', style: TextStyle(color: Colors.orange.shade300, fontSize: 12))
