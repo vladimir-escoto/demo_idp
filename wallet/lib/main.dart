@@ -20,6 +20,38 @@ class Cfg {
   static String mqttPrefix = 'tripleenable/idp/push';
   static String broker = ''; // etiqueta visible del broker
   static Color accent = const Color(0xFF5B9DFF);
+
+  // Nombre de ESTE dispositivo ("iPhone X"). Es lo que el usuario ve al elegir a
+  // qué dispositivo mandar el push, así que se puede renombrar y se persiste.
+  static const _kDeviceName = 'te_wallet_device_name';
+  static String get deviceName {
+    final saved = html.window.localStorage[_kDeviceName];
+    return (saved != null && saved.trim().isNotEmpty) ? saved.trim() : _guessDeviceName();
+  }
+
+  static set deviceName(String v) => html.window.localStorage[_kDeviceName] = v.trim();
+
+  static String get platform => _guessPlatform();
+}
+
+String _guessPlatform() {
+  final ua = html.window.navigator.userAgent;
+  if (ua.contains('iPhone')) return 'iOS';
+  if (ua.contains('iPad')) return 'iPadOS';
+  if (ua.contains('Android')) return 'Android';
+  if (ua.contains('Mac')) return 'macOS';
+  if (ua.contains('Windows')) return 'Windows';
+  return 'Web';
+}
+
+String _guessDeviceName() {
+  final ua = html.window.navigator.userAgent;
+  if (ua.contains('iPhone')) return 'iPhone';
+  if (ua.contains('iPad')) return 'iPad';
+  if (ua.contains('Android')) return 'Android';
+  if (ua.contains('Mac')) return 'Mac';
+  if (ua.contains('Windows')) return 'PC';
+  return 'Navegador';
 }
 
 Color get accent => Cfg.accent;
@@ -76,6 +108,9 @@ class Identity {
   final String username;
   final SimpleKeyPair keyPair;
   final String jwkX; // base64url de la pública
+  /// Id de ESTE dispositivo para esta identidad. Lo asigna el IdP y es lo que
+  /// permite dirigirle un push concreto (factores QR/Push).
+  String? deviceId;
   Identity(this.username, this.keyPair, this.jwkX);
 
   static final _ed = Ed25519();
@@ -85,9 +120,25 @@ class Identity {
 
   /// Registra (idempotente) la pública en el IdP.
   Future<void> register() async {
+    final jwk = {'kty': 'OKP', 'crv': 'Ed25519', 'x': jwkX};
     await http.post(Uri.parse('${Cfg.idpUrl}/device/register'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'username': username, 'name': username, 'jwk': {'kty': 'OKP', 'crv': 'Ed25519', 'x': jwkX}}));
+        body: jsonEncode({'username': username, 'name': username, 'jwk': jwk}));
+    // Enrolamiento con nombre de dispositivo: habilita los factores QR/Push.
+    // Los IdP antiguos no exponen /te/, así que fallar aquí no debe romper nada.
+    try {
+      final r = await http.post(Uri.parse('${Cfg.idpUrl}/te/device/register'),
+          headers: {'Content-Type': 'application/json'},
+          body: jsonEncode({
+            'username': username,
+            'jwk': jwk,
+            'deviceName': Cfg.deviceName,
+            'platform': Cfg.platform,
+          }));
+      if (r.statusCode == 200) {
+        deviceId = (jsonDecode(r.body) as Map<String, dynamic>)['deviceId']?.toString();
+      }
+    } catch (_) {}
   }
 
   Future<String> sign(String nonce) async {
@@ -247,6 +298,9 @@ class _HomeState extends State<Home> {
   final List<Map<String, dynamic>> _pushes = []; // cada push lleva '_forUser'
 
   String _topic(String u) => '${Cfg.mqttPrefix}/$u';
+  // Los factores QR/Push publican por dispositivo, no por usuario: así el push
+  // llega solo al "iPhone X" elegido y no a todos los dispositivos de la cuenta.
+  String _deviceTopic(String d) => '${Cfg.mqttPrefix}/te/$d';
 
   @override
   void initState() {
@@ -260,7 +314,11 @@ class _HomeState extends State<Home> {
     c.logging(on: false);
     c.keepAlivePeriod = 30;
     c.onConnected = () {
-      for (final id in _ids) c.subscribe(_topic(id.username), MqttQos.atMostOnce);
+      for (final id in _ids) {
+        c.subscribe(_topic(id.username), MqttQos.atMostOnce);
+        final d = id.deviceId;
+        if (d != null) c.subscribe(_deviceTopic(d), MqttQos.atMostOnce);
+      }
       setState(() => _mqttState = 'push activo');
     };
     c.onDisconnected = () => setState(() => _mqttState = 'desconectado');
@@ -274,7 +332,14 @@ class _HomeState extends State<Home> {
         final msg = MqttPublishPayload.bytesToStringAsString(rec.payload.message);
         try {
           final data = jsonDecode(msg) as Map<String, dynamic>;
-          data['_forUser'] = forUser;
+          if (data['v'] == 'te1') {
+            // Reto de los factores QR/Push: el topic identifica al dispositivo.
+            final owner = _byDevice(data['deviceId']?.toString());
+            if (owner == null) return;
+            data['_forUser'] = owner.username;
+          } else {
+            data['_forUser'] = forUser;
+          }
           setState(() => _pushes.insert(0, data));
         } catch (_) {}
       });
@@ -290,15 +355,46 @@ class _HomeState extends State<Home> {
     return null;
   }
 
+  Identity? _byDevice(String? d) {
+    if (d == null) return null;
+    for (final id in _ids) {
+      if (id.deviceId == d) return id;
+    }
+    return null;
+  }
+
   Future<void> _respond(Map<String, dynamic> req, Identity id, bool approve) async {
     final idp = (req['idp'] ?? Cfg.idpUrl).toString();
-    final body = <String, dynamic>{'username': id.username, 'uid': req['uid']};
-    if (approve) {
-      body['signature'] = await id.sign(req['nonce'].toString());
+
+    if (req['v'] == 'te1') {
+      // Factores QR/Push: el IdP verifica la firma y acuña el one-time token con
+      // el que la UI de Logto crea la sesión.
+      if (id.deviceId == null) {
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+              content: Text('Esta identidad aún no está enrolada como dispositivo'),
+              backgroundColor: Color(0xFF334155)));
+        }
+        return;
+      }
+      final body = <String, dynamic>{'deviceId': id.deviceId};
+      if (approve) {
+        body['signature'] = await id.sign(req['nonce'].toString());
+      } else {
+        body['decision'] = 'deny';
+      }
+      await http.post(Uri.parse('$idp/te/challenge/${req['challengeId']}/approve'),
+          headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
     } else {
-      body['decision'] = 'deny';
+      final body = <String, dynamic>{'username': id.username, 'uid': req['uid']};
+      if (approve) {
+        body['signature'] = await id.sign(req['nonce'].toString());
+      } else {
+        body['decision'] = 'deny';
+      }
+      await http.post(Uri.parse('$idp/device/approve'), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
     }
-    await http.post(Uri.parse('$idp/device/approve'), headers: {'Content-Type': 'application/json'}, body: jsonEncode(body));
+
     if (mounted) {
       setState(() => _pushes.remove(req));
       ScaffoldMessenger.of(context).showSnackBar(SnackBar(
@@ -314,6 +410,8 @@ class _HomeState extends State<Home> {
     if (!_ids.any((e) => e.username == id.username)) {
       _ids.add(id);
       _mqtt?.subscribe(_topic(id.username), MqttQos.atMostOnce);
+      final d = id.deviceId;
+      if (d != null) _mqtt?.subscribe(_deviceTopic(d), MqttQos.atMostOnce);
     }
     setState(() {});
   }
