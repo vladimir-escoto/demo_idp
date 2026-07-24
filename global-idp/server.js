@@ -63,6 +63,82 @@ function saveDevices() {
 }
 loadDevices();
 
+// ── Factores QR / Push para Logto ────────────────────────────────────────────
+// El registro anterior guarda UN dispositivo por usuario (flujo OIDC clásico).
+// Estos factores necesitan VARIOS dispositivos por identidad y con nombre propio
+// ("iPhone X") para poder dirigir el push, así que llevan su propio registro.
+const TE_DEVICES_FILE = process.env.TE_DEVICES_FILE || '/data/te-devices.json';
+const teDevices = new Map(); // deviceId -> { deviceId, username, email, name, platform, jwk }
+
+function loadTeDevices() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(TE_DEVICES_FILE, 'utf8'));
+    for (const [id, d] of Object.entries(raw)) teDevices.set(id, d);
+    console.log('te-devices cargados:', teDevices.size, 'desde', TE_DEVICES_FILE);
+  } catch (e) {
+    if (e.code !== 'ENOENT') console.error('load te-devices', e.message);
+  }
+}
+function saveTeDevices() {
+  try {
+    fs.mkdirSync(path.dirname(TE_DEVICES_FILE), { recursive: true });
+    const tmp = TE_DEVICES_FILE + '.tmp';
+    fs.writeFileSync(tmp, JSON.stringify(Object.fromEntries(teDevices)));
+    fs.renameSync(tmp, TE_DEVICES_FILE); // escritura atómica
+  } catch (e) { console.error('save te-devices', e.message); }
+}
+loadTeDevices();
+
+// Retos de firma en curso (efímeros: mueren con el proceso, como las sesiones OIDC).
+const teChallenges = new Map(); // challengeId -> { mode, email, deviceId, nonce, status, ts, oneTimeToken }
+const TE_CHALLENGE_TTL_MS = 3 * 60 * 1000;
+
+// Credenciales M2M para acuñar one-time tokens en Logto. Sin esto los factores
+// pueden verificar la firma pero no crear la sesión.
+const LOGTO_ENDPOINT = (process.env.LOGTO_ENDPOINT || '').replace(/\/$/, '');
+const LOGTO_M2M_APP_ID = process.env.LOGTO_M2M_APP_ID || '';
+const LOGTO_M2M_SECRET = process.env.LOGTO_M2M_SECRET || '';
+const LOGTO_API_RESOURCE = process.env.LOGTO_API_RESOURCE || 'https://default.logto.app/api';
+
+let logtoToken = null; // { accessToken, expiresAt }
+async function logtoAccessToken() {
+  if (logtoToken && logtoToken.expiresAt > Date.now() + 30_000) return logtoToken.accessToken;
+  if (!LOGTO_ENDPOINT || !LOGTO_M2M_APP_ID || !LOGTO_M2M_SECRET) {
+    throw new Error('faltan LOGTO_ENDPOINT / LOGTO_M2M_APP_ID / LOGTO_M2M_SECRET');
+  }
+  const body = new URLSearchParams({
+    grant_type: 'client_credentials',
+    resource: LOGTO_API_RESOURCE,
+    scope: 'all',
+  });
+  const r = await fetch(LOGTO_ENDPOINT + '/oidc/token', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+      Authorization: 'Basic ' + Buffer.from(LOGTO_M2M_APP_ID + ':' + LOGTO_M2M_SECRET).toString('base64'),
+    },
+    body,
+  });
+  if (!r.ok) throw new Error('logto token ' + r.status + ' ' + (await r.text()));
+  const j = await r.json();
+  logtoToken = { accessToken: j.access_token, expiresAt: Date.now() + j.expires_in * 1000 };
+  return logtoToken.accessToken;
+}
+
+// Un one-time token identifica al usuario por email en la Experience API de Logto.
+// Solo lo emitimos DESPUÉS de haber verificado la firma Ed25519 del dispositivo.
+async function mintOneTimeToken(email) {
+  const token = await logtoAccessToken();
+  const r = await fetch(LOGTO_ENDPOINT + '/api/one-time-tokens', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+    body: JSON.stringify({ email }),
+  });
+  if (!r.ok) throw new Error('one-time-token ' + r.status + ' ' + (await r.text()));
+  const j = await r.json();
+  return j.token;
+}
+
 const clients = [
   { client_id: 'zitadel', client_secret: process.env.CLIENT_SECRET_ZITADEL || 'zitadel-tripleenable-idp-secret',
     grant_types: ['authorization_code'], response_types: ['code'],
@@ -135,6 +211,51 @@ initMqtt();
 
 const requests = new Map(); // uid -> { client, status, accountId, nonce, ts }
 
+// ── Protocolo te2 ────────────────────────────────────────────────────────────
+// te1 firmaba un nonce opaco: demostraba tener la llave, pero no DECÍA QUÉ se
+// autorizaba, y el challengeId (que viaja en el QR y por el broker público) bastaba
+// para cobrar el token. te2 arregla las dos cosas:
+//
+//   · channel binding: el navegador guarda un `verifier` y solo publica su hash. El
+//     token se entrega a quien pruebe tener el verifier, no a quien vea el QR.
+//   · transcript firmado: el wallet firma un texto canónico con emisor, dominio,
+//     aplicación y caducidad, y puede mostrárselo al usuario antes de firmar.
+const sha256hex = (value) => crypto.createHash('sha256').update(value).digest('hex');
+
+/** Lo que el wallet ve y firma. No es secreto: el secreto es el verifier. */
+function teTranscript(challengeId, ch) {
+  return {
+    v: 'te2',
+    iss: ISSUER,
+    rp: LOGTO_ENDPOINT || '(sin configurar)',
+    client: ch.client || '-',
+    challengeId,
+    nonce: ch.nonce,
+    verifierHash: ch.verifierHash || '-',
+    iat: Math.floor(ch.ts / 1000),
+    exp: Math.floor((ch.ts + TE_CHALLENGE_TTL_MS) / 1000),
+  };
+}
+
+/**
+ * Serialización canónica: orden de campos fijo y `clave=valor` por línea. Evita
+ * depender de cómo ordene las claves cada lenguaje al serializar JSON — el wallet
+ * (Dart) tiene que reconstruir exactamente estos bytes.
+ */
+function teTranscriptString(t) {
+  return [
+    t.v,
+    'iss=' + t.iss,
+    'rp=' + t.rp,
+    'client=' + t.client,
+    'challengeId=' + t.challengeId,
+    'nonce=' + t.nonce,
+    'verifierHash=' + t.verifierHash,
+    'iat=' + t.iat,
+    'exp=' + t.exp,
+  ].join('\n');
+}
+
 function verifyEd25519(deviceJwk, msg, sigB64) {
   try {
     const pub = crypto.createPublicKey({ key: deviceJwk, format: 'jwk' });
@@ -145,7 +266,7 @@ function verifyEd25519(deviceJwk, msg, sigB64) {
 function readBody(req) { return new Promise((r) => { let b = ''; req.on('data', (c) => (b += c)); req.on('end', () => r(b)); }); }
 function json(res, code, obj, extra) { res.writeHead(code, Object.assign({ 'Content-Type': 'application/json' }, cors(), extra || {})); res.end(JSON.stringify(obj)); }
 function page(res, code, body) { res.writeHead(code, { 'Content-Type': 'text/html; charset=utf-8' }); res.end(body); }
-function cors() { return { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'POST, OPTIONS' }; }
+function cors() { return { 'Access-Control-Allow-Origin': '*', 'Access-Control-Allow-Headers': 'Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' }; }
 
 function shell(title, body) {
   return `<!doctype html><html lang="es"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title><style>
@@ -183,7 +304,7 @@ async function handle(req, res) {
     }
   }
 
-  if (req.method === 'OPTIONS' && pathname.startsWith('/device/')) { res.writeHead(204, cors()); return res.end(); }
+  if (req.method === 'OPTIONS' && (pathname.startsWith('/device/') || pathname.startsWith('/te/'))) { res.writeHead(204, cors()); return res.end(); }
 
   const m = pathname.match(/^\/interaction\/([\w-]+)(\/status|\/finish|\/push)?$/);
 
@@ -260,6 +381,165 @@ async function handle(req, res) {
   if (pathname === '/device/challenge') { // opcional: consultar el nonce de un uid (por si el wallet lo pide)
     const q = parse(req.url, true).query; const r = requests.get(q.uid);
     return json(res, 200, r ? { uid: q.uid, nonce: r.nonce, client: r.client } : { error: 'no request' });
+  }
+
+  // ── Factores QR / Push (los consume la UI de Logto sin redirección) ──
+  // Enrola un dispositivo con nombre propio ("iPhone X"). Un usuario puede tener varios.
+  if (pathname === '/te/device/register' && req.method === 'POST') {
+    const { username, jwk: pub, deviceName, platform } = JSON.parse(await readBody(req) || '{}');
+    if (!username || !pub || pub.kty !== 'OKP') return json(res, 400, { error: 'username + jwk OKP requeridos' });
+    const deviceId = crypto.createHash('sha256')
+      .update(username + '|' + JSON.stringify(pub) + '|' + (deviceName || ''))
+      .digest('hex').slice(0, 24);
+    teDevices.set(deviceId, {
+      deviceId,
+      username,
+      email: emailFor(username),
+      name: deviceName || username,
+      platform: platform || undefined,
+      jwk: pub,
+    });
+    saveTeDevices();
+    // El registro clásico sigue alimentándose para no romper el flujo OIDC con QR.
+    devices.set(username, { jwk: pub, name: deviceName || username });
+    saveDevices();
+    console.log('te-device registrado:', deviceId, username, deviceName || '');
+    return json(res, 200, { ok: true, deviceId });
+  }
+
+  // Dispositivos de una identidad: alimenta el selector "¿a qué dispositivo?".
+  // Acepta lo que el usuario haya escrito en el login: correo o nombre de usuario.
+  if (pathname === '/te/devices' && req.method === 'GET') {
+    const q = parse(req.url, true).query;
+    const who = (q.identifier || q.email || '').toString().trim().toLowerCase();
+    const list = [...teDevices.values()]
+      .filter((d) => (d.email || '').toLowerCase() === who || (d.username || '').toLowerCase() === who)
+      .map((d) => ({ deviceId: d.deviceId, name: d.name, platform: d.platform }));
+    return json(res, 200, { devices: list });
+  }
+
+  // Abre un reto de firma: QR escaneable, o push dirigido a un dispositivo concreto.
+  if (pathname === '/te/challenge' && req.method === 'POST') {
+    const { mode, email, deviceId, verifierHash, client } = JSON.parse(await readBody(req) || '{}');
+    if (mode !== 'qr' && mode !== 'push') return json(res, 400, { error: 'mode debe ser qr o push' });
+
+    const challengeId = crypto.randomBytes(16).toString('hex');
+    const nonce = crypto.randomBytes(20).toString('hex');
+    const ch = { mode, email, deviceId, nonce, verifierHash, client, status: 'pending', ts: Date.now() };
+    teChallenges.set(challengeId, ch);
+
+    if (mode === 'push') {
+      const d = teDevices.get(deviceId);
+      if (!d) return json(res, 404, { error: 'dispositivo no encontrado' });
+
+      // Number matching: el navegador enseña UN número y el teléfono ofrece tres.
+      // El binding criptográfico no cubre esto — en un push el usuario no está
+      // mirando la pantalla que inició el login, así que hay que obligarle a mirarla.
+      const matchNumber = 10 + crypto.randomInt(90);
+      const choices = new Set([matchNumber]);
+      while (choices.size < 3) choices.add(10 + crypto.randomInt(90));
+      ch.matchNumber = matchNumber;
+      ch.choices = [...choices].sort(() => crypto.randomInt(2) - 0.5);
+
+      // El broker es público, así que el push es solo un timbre: lleva el id del reto
+      // y nada más. El material a firmar se recoge por TLS contra el IdP.
+      const topic = PUSH_PREFIX + '/te/' + deviceId; // topic por dispositivo → push dirigido
+      if (mqttClient && mqttClient.connected) {
+        mqttClient.publish(topic, JSON.stringify({ v: 'te2', idp: ISSUER, challengeId, deviceId }));
+      }
+      return json(res, 200, { challengeId, matchNumber, pushed: !!(mqttClient && mqttClient.connected) });
+    }
+
+    // El QR tampoco lleva el nonce: solo apunta al reto. Quien lo fotografíe no se
+    // lleva nada útil, porque el token se cobra con el verifier que solo tiene el navegador.
+    const qrPayload = JSON.stringify({ v: 'te2', idp: ISSUER, challengeId });
+    const qrDataUrl = await QRCode.toDataURL(qrPayload, { margin: 1, width: 240 });
+    return json(res, 200, { challengeId, qrDataUrl, qrPayload });
+  }
+
+  const tm = pathname.match(/^\/te\/challenge\/([\w-]+)(\/approve|\/transcript|\/status)?$/);
+
+  // Lo que el wallet debe mostrar y firmar. Público a propósito: el secreto es el verifier.
+  if (tm && tm[2] === '/transcript' && req.method === 'GET') {
+    const ch = teChallenges.get(tm[1]);
+    if (!ch) return json(res, 404, { error: 'reto no encontrado' });
+    const t = teTranscript(tm[1], ch);
+    return json(res, 200, { transcript: t, signingString: teTranscriptString(t), choices: ch.choices });
+  }
+
+  // Estado + canje. El token solo se entrega a quien pruebe tener el verifier, no a
+  // quien conozca el challengeId (que viaja en el QR y por el broker).
+  if (tm && tm[2] === '/status' && req.method === 'POST') {
+    const ch = teChallenges.get(tm[1]);
+    if (!ch) return json(res, 404, { status: 'expired' });
+    if (Date.now() - ch.ts > TE_CHALLENGE_TTL_MS) { teChallenges.delete(tm[1]); return json(res, 200, { status: 'expired' }); }
+
+    const { verifier } = JSON.parse(await readBody(req) || '{}');
+    if (ch.verifierHash && sha256hex(String(verifier || '')) !== ch.verifierHash) {
+      return json(res, 403, { error: 'verifier inválido' });
+    }
+
+    if (ch.status === 'approved') {
+      teChallenges.delete(tm[1]); // un token, un uso
+      return json(res, 200, { status: 'approved', oneTimeToken: ch.oneTimeToken, email: ch.email, deviceName: ch.deviceName });
+    }
+    return json(res, 200, { status: ch.status });
+  }
+
+  // Compatibilidad te1: los IdP ya desplegados siguen sondeando por GET. Solo entrega
+  // el token si el reto NO tiene channel binding; con binding hay que ir por /status.
+  if (tm && !tm[2] && req.method === 'GET') {
+    const ch = teChallenges.get(tm[1]);
+    if (!ch) return json(res, 404, { status: 'expired' });
+    if (Date.now() - ch.ts > TE_CHALLENGE_TTL_MS) { teChallenges.delete(tm[1]); return json(res, 200, { status: 'expired' }); }
+    if (ch.status === 'approved' && !ch.verifierHash) {
+      teChallenges.delete(tm[1]);
+      return json(res, 200, { status: 'approved', oneTimeToken: ch.oneTimeToken, email: ch.email, deviceName: ch.deviceName });
+    }
+    return json(res, 200, { status: ch.status });
+  }
+
+  // El wallet aprueba: verificamos la firma Ed25519 y solo entonces acuñamos el token.
+  if (tm && tm[2] === '/approve' && req.method === 'POST') {
+    const ch = teChallenges.get(tm[1]);
+    if (!ch) return json(res, 404, { error: 'reto no encontrado' });
+    const { deviceId, signature, decision, choice } = JSON.parse(await readBody(req) || '{}');
+
+    if (decision === 'deny') { ch.status = 'denied'; return json(res, 200, { ok: true, decision: 'deny' }); }
+
+    // Number matching: si el dispositivo toca otro número, el intento muere aquí.
+    if (ch.matchNumber !== undefined && Number(choice) !== ch.matchNumber) {
+      ch.status = 'mismatch';
+      return json(res, 403, { error: 'numero incorrecto', decision: 'mismatch' });
+    }
+
+    const d = teDevices.get(deviceId);
+    if (!d) return json(res, 401, { error: 'dispositivo no registrado' });
+    // En push el reto ya venía dirigido: no dejamos que otro dispositivo lo conteste.
+    if (ch.mode === 'push' && ch.deviceId && ch.deviceId !== deviceId) {
+      return json(res, 403, { error: 'este reto es de otro dispositivo' });
+    }
+    // te2 firma el transcript entero (emisor, dominio, aplicación, caducidad), así que
+    // la firma queda atada al contexto y no sirve en otro sitio. te1 firmaba el nonce
+    // pelado; se sigue aceptando para los wallets ya desplegados.
+    const signed = ch.verifierHash
+      ? teTranscriptString(teTranscript(tm[1], ch))
+      : ch.nonce;
+
+    if (!verifyEd25519(d.jwk, signed, signature)) return json(res, 401, { error: 'firma inválida' });
+
+    try {
+      ch.oneTimeToken = await mintOneTimeToken(d.email);
+    } catch (e) {
+      console.error('mint one-time token', e.message);
+      return json(res, 502, { error: 'no se pudo emitir el token en Logto' });
+    }
+
+    ch.email = d.email;
+    ch.deviceName = d.name;
+    ch.status = 'approved';
+    console.log('te-challenge aprobado:', tm[1], d.email, d.name);
+    return json(res, 200, { ok: true, decision: 'approve' });
   }
 
   if (pathname === '/healthz') return page(res, 200, 'ok');
