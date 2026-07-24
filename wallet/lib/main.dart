@@ -363,7 +363,8 @@ class _HomeState extends State<Home> {
     return null;
   }
 
-  Future<void> _respond(Map<String, dynamic> req, Identity id, bool approve) async {
+  /// [choice] es el número que el usuario tocó cuando el reto usa number matching.
+  Future<void> _respond(Map<String, dynamic> req, Identity id, bool approve, {int? choice}) async {
     final idp = (req['idp'] ?? Cfg.idpUrl).toString();
 
     if (req['v'] == 'te1') {
@@ -380,6 +381,7 @@ class _HomeState extends State<Home> {
       final body = <String, dynamic>{'deviceId': id.deviceId};
       if (approve) {
         body['signature'] = await id.sign(req['nonce'].toString());
+        if (choice != null) body['choice'] = choice;
       } else {
         body['decision'] = 'deny';
       }
@@ -548,6 +550,26 @@ class _HomeState extends State<Home> {
                   const SizedBox(height: 10),
                   if (id == null)
                     Text('No tienes esa identidad en este dispositivo.', style: TextStyle(color: Colors.orange.shade300, fontSize: 12))
+                  // Number matching: hay que mirar la pantalla donde empezó el login.
+                  // Aprobar a ciegas ya no basta, que es lo que corta el prompt-bombing.
+                  else if (r['choices'] is List) ...[
+                    Text('Toca el número que ves en la pantalla', style: TextStyle(color: Colors.grey.shade400, fontSize: 13)),
+                    const SizedBox(height: 10),
+                    Row(children: [
+                      for (final n in (r['choices'] as List))
+                        Expanded(
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(horizontal: 4),
+                            child: OutlinedButton(
+                              onPressed: () => _respond(r, id, true, choice: int.tryParse('$n')),
+                              child: Text('$n', style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700)),
+                            ),
+                          ),
+                        ),
+                    ]),
+                    const SizedBox(height: 8),
+                    TextButton(onPressed: () => _respond(r, id, false), child: const Text('No he sido yo', style: TextStyle(color: Color(0xFFF87171)))),
+                  ]
                   else
                     Row(children: [
                       Expanded(child: FilledButton(onPressed: () => _respond(r, id, true), style: FilledButton.styleFrom(backgroundColor: ok, foregroundColor: bg), child: const Text('Aprobar'))),

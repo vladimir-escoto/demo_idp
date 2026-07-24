@@ -363,10 +363,12 @@ async function handle(req, res) {
   }
 
   // Dispositivos de una identidad: alimenta el selector "¿a qué dispositivo?".
+  // Acepta lo que el usuario haya escrito en el login: correo o nombre de usuario.
   if (pathname === '/te/devices' && req.method === 'GET') {
-    const email = (parse(req.url, true).query.email || '').toString().toLowerCase();
+    const q = parse(req.url, true).query;
+    const who = (q.identifier || q.email || '').toString().trim().toLowerCase();
     const list = [...teDevices.values()]
-      .filter((d) => (d.email || '').toLowerCase() === email)
+      .filter((d) => (d.email || '').toLowerCase() === who || (d.username || '').toLowerCase() === who)
       .map((d) => ({ deviceId: d.deviceId, name: d.name, platform: d.platform }));
     return json(res, 200, { devices: list });
   }
@@ -384,11 +386,23 @@ async function handle(req, res) {
     if (mode === 'push') {
       const d = teDevices.get(deviceId);
       if (!d) return json(res, 404, { error: 'dispositivo no encontrado' });
+
+      // Number matching: el navegador enseña UN número y el teléfono ofrece tres.
+      // Aprobar a ciegas ya no sirve — hay que mirar la pantalla que inició el login,
+      // que es lo que corta el prompt-bombing.
+      const matchNumber = 10 + crypto.randomInt(90);
+      const choices = new Set([matchNumber]);
+      while (choices.size < 3) choices.add(10 + crypto.randomInt(90));
+      ch.matchNumber = matchNumber;
+      ch.choices = [...choices].sort(() => crypto.randomInt(2) - 0.5);
+
       const topic = PUSH_PREFIX + '/te/' + deviceId; // topic por dispositivo → push dirigido
       if (mqttClient && mqttClient.connected) {
-        mqttClient.publish(topic, JSON.stringify({ v: 'te1', idp: ISSUER, challengeId, nonce, deviceId, name: d.name }));
+        mqttClient.publish(topic, JSON.stringify({
+          v: 'te1', idp: ISSUER, challengeId, nonce, deviceId, name: d.name, choices: ch.choices,
+        }));
       }
-      return json(res, 200, { challengeId, pushed: !!(mqttClient && mqttClient.connected) });
+      return json(res, 200, { challengeId, matchNumber, pushed: !!(mqttClient && mqttClient.connected) });
     }
 
     // El payload va dentro del propio QR, así que devolverlo en texto no añade
@@ -416,9 +430,15 @@ async function handle(req, res) {
   if (tm && tm[2] === '/approve' && req.method === 'POST') {
     const ch = teChallenges.get(tm[1]);
     if (!ch) return json(res, 404, { error: 'reto no encontrado' });
-    const { deviceId, signature, decision } = JSON.parse(await readBody(req) || '{}');
+    const { deviceId, signature, decision, choice } = JSON.parse(await readBody(req) || '{}');
 
     if (decision === 'deny') { ch.status = 'denied'; return json(res, 200, { ok: true, decision: 'deny' }); }
+
+    // Number matching: si el dispositivo toca otro número, el intento muere aquí.
+    if (ch.matchNumber !== undefined && Number(choice) !== ch.matchNumber) {
+      ch.status = 'mismatch';
+      return json(res, 403, { error: 'numero incorrecto', decision: 'mismatch' });
+    }
 
     const d = teDevices.get(deviceId);
     if (!d) return json(res, 401, { error: 'dispositivo no registrado' });
